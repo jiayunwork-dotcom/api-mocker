@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,20 @@ import (
 	"api-mocker/handlers"
 	"api-mocker/middleware"
 )
+
+func requestSizeLimitMiddleware(maxSize int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.ContentLength > maxSize {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+				"error": fmt.Sprintf("请求过大，最大允许 %d MB", maxSize/1024/1024),
+			})
+			c.Abort()
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxSize)
+		c.Next()
+	}
+}
 
 func main() {
 	cfg := config.Load()
@@ -79,7 +94,7 @@ func main() {
 			{
 				apis.GET("", h.ListAPIs)
 				apis.POST("", h.CreateAPI)
-				apis.POST("/import", h.ImportOpenAPI)
+				apis.POST("/import", requestSizeLimitMiddleware(2*1024*1024), h.ImportOpenAPI)
 				apis.GET("/:id", h.GetAPI)
 				apis.PUT("/:id", h.UpdateAPI)
 				apis.DELETE("/:id", h.DeleteAPI)

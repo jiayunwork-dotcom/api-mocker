@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 
 	"api-mocker/models"
 )
+
+const maxImportFileSize = 2 * 1024 * 1024
 
 type ImportRequest struct {
 	Content string `json:"content"`
@@ -41,26 +44,62 @@ func (h *Handler) ImportOpenAPI(c *gin.Context) {
 		return
 	}
 
+	if c.Request.ContentLength > maxImportFileSize {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+			"error": fmt.Sprintf("文件大小超过限制，最大允许 %d MB", maxImportFileSize/1024/1024),
+		})
+		return
+	}
+
 	var content string
 	contentType := c.ContentType()
 
 	if strings.Contains(contentType, "multipart/form-data") {
-		file, _, err := c.Request.FormFile("file")
+		file, header, err := c.Request.FormFile("file")
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to get uploaded file"})
 			return
 		}
 		defer file.Close()
 
-		fileBytes, err := io.ReadAll(file)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read file content"})
+		if header.Size > maxImportFileSize {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+				"error": fmt.Sprintf("文件大小超过限制，最大允许 %d MB", maxImportFileSize/1024/1024),
+			})
 			return
 		}
+
+		fileBytes, err := io.ReadAll(file)
+		if err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+					"error": fmt.Sprintf("文件大小超过限制，最大允许 %d MB", maxImportFileSize/1024/1024),
+				})
+			} else {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read file content"})
+			}
+			return
+		}
+
 		content = string(fileBytes)
 	} else {
+		bodyBytes, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+					"error": fmt.Sprintf("请求内容超过限制，最大允许 %d MB", maxImportFileSize/1024/1024),
+				})
+			} else {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
+			}
+			return
+		}
+		c.Request.Body.Close()
+
 		var req ImportRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
+		if err := json.Unmarshal(bodyBytes, &req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
 			return
 		}

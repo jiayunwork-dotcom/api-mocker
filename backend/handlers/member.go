@@ -12,7 +12,7 @@ import (
 )
 
 func (h *Handler) ListMembers(c *gin.Context) {
-	workspaceID := c.Param("id")
+	workspaceID := c.Param("workspaceId")
 	userID := c.GetString("userID")
 
 	_, err := h.getWorkspaceRole(workspaceID, userID)
@@ -38,7 +38,7 @@ func (h *Handler) ListMembers(c *gin.Context) {
 }
 
 func (h *Handler) InviteMember(c *gin.Context) {
-	workspaceID := c.Param("id")
+	workspaceID := c.Param("workspaceId")
 	userID := c.GetString("userID")
 
 	role, err := h.getWorkspaceRole(workspaceID, userID)
@@ -161,7 +161,7 @@ func (h *Handler) JoinWorkspace(c *gin.Context) {
 }
 
 func (h *Handler) UpdateMemberRole(c *gin.Context) {
-	workspaceID := c.Param("id")
+	workspaceID := c.Param("workspaceId")
 	memberID := c.Param("memberId")
 	userID := c.GetString("userID")
 
@@ -192,7 +192,7 @@ func (h *Handler) UpdateMemberRole(c *gin.Context) {
 }
 
 func (h *Handler) RemoveMember(c *gin.Context) {
-	workspaceID := c.Param("id")
+	workspaceID := c.Param("workspaceId")
 	memberID := c.Param("memberId")
 	userID := c.GetString("userID")
 

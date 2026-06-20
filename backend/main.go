@@ -49,24 +49,21 @@ func main() {
 			{
 				workspaces.GET("", h.ListWorkspaces)
 				workspaces.POST("", h.CreateWorkspace)
-				workspaces.GET("/:id", h.GetWorkspace)
-				workspaces.PUT("/:id", h.UpdateWorkspace)
-				workspaces.DELETE("/:id", h.DeleteWorkspace)
+				workspaces.GET("/:workspaceId", h.GetWorkspace)
+				workspaces.PUT("/:workspaceId", h.UpdateWorkspace)
+				workspaces.DELETE("/:workspaceId", h.DeleteWorkspace)
 
-				workspaces.GET("/:id/members", h.ListMembers)
-				workspaces.POST("/:id/members/invite", h.InviteMember)
+				workspaces.GET("/:workspaceId/members", h.ListMembers)
+				workspaces.POST("/:workspaceId/members/invite", h.InviteMember)
 				workspaces.POST("/join", h.JoinWorkspace)
-				workspaces.PUT("/:id/members/:memberId", h.UpdateMemberRole)
-				workspaces.DELETE("/:id/members/:memberId", h.RemoveMember)
-			}
+				workspaces.PUT("/:workspaceId/members/:memberId", h.UpdateMemberRole)
+				workspaces.DELETE("/:workspaceId/members/:memberId", h.RemoveMember)
 
-			projects := auth.Group("/workspaces/:workspaceId/projects")
-			{
-				projects.GET("", h.ListProjects)
-				projects.POST("", h.CreateProject)
-				projects.GET("/:id", h.GetProject)
-				projects.PUT("/:id", h.UpdateProject)
-				projects.DELETE("/:id", h.DeleteProject)
+				workspaces.GET("/:workspaceId/projects", h.ListProjects)
+				workspaces.POST("/:workspaceId/projects", h.CreateProject)
+				workspaces.GET("/:workspaceId/projects/:projectId", h.GetProject)
+				workspaces.PUT("/:workspaceId/projects/:projectId", h.UpdateProject)
+				workspaces.DELETE("/:workspaceId/projects/:projectId", h.DeleteProject)
 			}
 
 			models := auth.Group("/projects/:projectId/models")

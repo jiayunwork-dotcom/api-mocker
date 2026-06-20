@@ -81,7 +81,7 @@ func (h *Handler) CreateWorkspace(c *gin.Context) {
 }
 
 func (h *Handler) GetWorkspace(c *gin.Context) {
-	id := c.Param("id")
+	id := c.Param("workspaceId")
 	userID := c.GetString("userID")
 
 	role, err := h.getWorkspaceRole(id, userID)
@@ -101,7 +101,7 @@ func (h *Handler) GetWorkspace(c *gin.Context) {
 }
 
 func (h *Handler) UpdateWorkspace(c *gin.Context) {
-	id := c.Param("id")
+	id := c.Param("workspaceId")
 	userID := c.GetString("userID")
 
 	role, err := h.getWorkspaceRole(id, userID)
@@ -134,7 +134,7 @@ func (h *Handler) UpdateWorkspace(c *gin.Context) {
 }
 
 func (h *Handler) DeleteWorkspace(c *gin.Context) {
-	id := c.Param("id")
+	id := c.Param("workspaceId")
 	userID := c.GetString("userID")
 
 	role, err := h.getWorkspaceRole(id, userID)

@@ -77,7 +77,7 @@ func (h *Handler) CreateProject(c *gin.Context) {
 }
 
 func (h *Handler) GetProject(c *gin.Context) {
-	projectID := c.Param("id")
+	projectID := c.Param("projectId")
 	workspaceID := c.Param("workspaceId")
 	userID := c.GetString("userID")
 
@@ -98,7 +98,7 @@ func (h *Handler) GetProject(c *gin.Context) {
 }
 
 func (h *Handler) UpdateProject(c *gin.Context) {
-	projectID := c.Param("id")
+	projectID := c.Param("projectId")
 	workspaceID := c.Param("workspaceId")
 	userID := c.GetString("userID")
 
@@ -137,7 +137,7 @@ func (h *Handler) UpdateProject(c *gin.Context) {
 }
 
 func (h *Handler) DeleteProject(c *gin.Context) {
-	projectID := c.Param("id")
+	projectID := c.Param("projectId")
 	workspaceID := c.Param("workspaceId")
 	userID := c.GetString("userID")
 

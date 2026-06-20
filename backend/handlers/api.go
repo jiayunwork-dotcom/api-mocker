@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -238,6 +239,24 @@ func (h *Handler) UpdateAPI(c *gin.Context) {
 	}
 
 	h.createVersion(apiID, c.GetString("userID"), &oldAPI, newAPI)
+
+	userID := c.GetString("userID")
+	report, err := h.analyzeImpact(apiID, projectID, userID, oldAPI, newAPI)
+	if err != nil {
+		log.Printf("[impact-analysis] Failed to analyze impact: %v", err)
+	} else if report != nil {
+		var affected []models.AffectedDownstream
+		json.Unmarshal([]byte(report.AffectedDownstream), &affected)
+
+		if report.HasBreakingChange {
+			h.BroadcastDependencyBreak(projectID, models.DependencyBreakMessage{
+				ChangedAPIPath: report.ChangedAPIPath,
+				AffectedCount:  len(affected),
+				ReportID:       report.ID,
+				ProjectID:      projectID,
+			})
+		}
+	}
 
 	var updated models.API
 	h.db.Get(&updated, "SELECT * FROM apis WHERE id = $1", apiID)

@@ -151,6 +151,20 @@ func main() {
 
 			apis.GET("/:id/probe", h.GetAPIProbe)
 			apis.POST("/:id/probe", h.CreateProbeForAPI)
+
+			dependencies := auth.Group("/projects/:projectId/dependencies")
+			{
+				dependencies.GET("", h.ListDependencies)
+				dependencies.POST("", h.CreateDependency)
+				dependencies.PUT("/:id", h.UpdateDependency)
+				dependencies.DELETE("/:id", h.DeleteDependency)
+			}
+
+			impactReports := auth.Group("/projects/:projectId/impact-reports")
+			{
+				impactReports.GET("", h.ListImpactReports)
+				impactReports.GET("/:id", h.GetImpactReport)
+			}
 		}
 
 		api.POST("/register", h.Register)

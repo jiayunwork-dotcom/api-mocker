@@ -1,8 +1,115 @@
 <template>
-  <router-view />
+  <div class="app-container">
+    <div
+      v-if="breakAlert.show"
+      class="break-alert"
+      @click="handleAlertClick"
+    >
+      <div class="alert-content">
+        <el-icon class="alert-icon"><Warning /></el-icon>
+        <span>
+          <strong>破坏性变更告警：</strong>
+          接口 <code>{{ breakAlert.apiPath }}</code> 的变更影响了
+          <strong>{{ breakAlert.affectedCount }}</strong> 个下游接口，
+          <span class="alert-link">点击查看详情</span>
+        </span>
+      </div>
+      <el-button class="alert-close" text @click.stop="breakAlert.show = false">
+        <el-icon><Close /></el-icon>
+      </el-button>
+    </div>
+    <router-view />
+  </div>
 </template>
 
 <script setup>
+import { ref, provide, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { Warning, Close } from '@element-plus/icons-vue'
+
+const router = useRouter()
+const route = useRoute()
+
+const breakAlert = ref({
+  show: false,
+  apiPath: '',
+  affectedCount: 0,
+  reportId: '',
+  projectId: ''
+})
+
+const wsConnections = ref({})
+
+function handleAlertClick() {
+  if (breakAlert.value.projectId && breakAlert.value.reportId) {
+    router.push({
+      path: `/project/${breakAlert.value.projectId}`,
+      query: { tab: 'dependency', report: breakAlert.value.reportId }
+    })
+    breakAlert.value.show = false
+  }
+}
+
+function connectWebSocket(projectId) {
+  if (wsConnections.value[projectId]) {
+    return wsConnections.value[projectId]
+  }
+
+  const token = localStorage.getItem('token')
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = `${protocol}//${window.location.host}/api/projects/${projectId}/probes/ws?token=${token}`
+
+  const ws = new WebSocket(wsUrl)
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      if (data.eventType === 'dependency_break') {
+        breakAlert.value = {
+          show: true,
+          apiPath: data.changedApiPath,
+          affectedCount: data.affectedCount,
+          reportId: data.reportId,
+          projectId: data.projectId
+        }
+
+        if (route.params.id === data.projectId) {
+          const event = new CustomEvent('dependency-break', { detail: data })
+          window.dispatchEvent(event)
+        }
+      }
+    } catch (e) {
+      console.error('Failed to parse WebSocket message:', e)
+    }
+  }
+
+  ws.onerror = (error) => {
+    console.error('WebSocket error:', error)
+  }
+
+  ws.onclose = () => {
+    delete wsConnections.value[projectId]
+  }
+
+  wsConnections.value[projectId] = ws
+  return ws
+}
+
+function closeWebSocket(projectId) {
+  if (wsConnections.value[projectId]) {
+    wsConnections.value[projectId].close()
+    delete wsConnections.value[projectId]
+  }
+}
+
+provide('wsConnect', connectWebSocket)
+provide('wsClose', closeWebSocket)
+
+onMounted(() => {
+  window.addEventListener('dependency-break', (e) => {
+    console.log('Received dependency break event:', e.detail)
+  })
+})
 </script>
 
 <style>
@@ -61,4 +168,74 @@ body {
 .method-delete { background: #f93e3e; }
 .method-head { background: #9012fe; }
 .method-options { background: #9012fe; }
+
+.app-container {
+  position: relative;
+  min-height: 100vh;
+}
+
+.break-alert {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  background: linear-gradient(90deg, #fef2f2, #fff5f5);
+  border-bottom: 2px solid #f56c6c;
+  padding: 12px 24px;
+  cursor: pointer;
+  animation: slideDown 0.3s ease-out;
+  box-shadow: 0 2px 12px rgba(245, 108, 108, 0.2);
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.alert-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #f56c6c;
+  font-size: 14px;
+}
+
+.alert-icon {
+  font-size: 20px;
+  color: #f56c6c;
+}
+
+.alert-content code {
+  background: #fde2e2;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  margin: 0 4px;
+}
+
+.alert-link {
+  color: #409eff;
+  text-decoration: underline;
+  margin-left: 4px;
+}
+
+.alert-close {
+  position: absolute;
+  right: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #f56c6c;
+  padding: 4px;
+}
+
+.alert-close:hover {
+  color: #d9363e;
+}
 </style>

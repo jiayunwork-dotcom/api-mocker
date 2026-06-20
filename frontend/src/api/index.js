@@ -132,4 +132,16 @@ export const probeAPI = {
   availabilityTrend: (projectId, probeId) => api.get(`/projects/${projectId}/probes/${probeId}/availability-trend`)
 }
 
+export const dependencyAPI = {
+  list: (projectId) => api.get(`/projects/${projectId}/dependencies`),
+  create: (projectId, data) => api.post(`/projects/${projectId}/dependencies`, data),
+  update: (projectId, id, data) => api.put(`/projects/${projectId}/dependencies/${id}`, data),
+  delete: (projectId, id) => api.delete(`/projects/${projectId}/dependencies/${id}`)
+}
+
+export const impactReportAPI = {
+  list: (projectId) => api.get(`/projects/${projectId}/impact-reports`),
+  get: (projectId, id) => api.get(`/projects/${projectId}/impact-reports/${id}`)
+}
+
 export default api

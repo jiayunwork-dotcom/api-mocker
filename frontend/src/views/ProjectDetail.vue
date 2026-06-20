@@ -66,6 +66,125 @@
         <el-tab-pane label="健康监控" name="health">
           <HealthMonitor :projectId="projectId" />
         </el-tab-pane>
+
+        <el-tab-pane label="依赖图谱" name="dependency">
+          <div class="dependency-section">
+            <div class="section-header">
+              <div class="section-title" style="margin:0">依赖关系管理</div>
+              <el-button type="primary" @click="openDepDialog()">新建依赖</el-button>
+            </div>
+
+            <el-table
+              :data="dependencies"
+              style="width: 100%"
+              :expand-row-keys="expandedDepRows"
+              @expand-change="onDepExpandChange"
+            >
+              <el-table-column type="expand">
+                <template #default="{ row }">
+                  <div class="mapping-detail">
+                    <div class="mapping-title">字段映射详情：</div>
+                    <div
+                      v-for="(mapping, idx) in parseMappings(row.field_mappings)"
+                      :key="idx"
+                      class="mapping-item"
+                    >
+                      <span class="mapping-arrow">{{ mapping.upstreamField }}</span>
+                      <el-icon><Right /></el-icon>
+                      <span class="mapping-arrow">{{ mapping.downstreamField }}</span>
+                    </div>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="上游接口" min-width="200">
+                <template #default="{ row }">
+                  <span :class="['method-badge', `method-${row.upstream_method.toLowerCase()}`]">
+                    {{ row.upstream_method }}
+                  </span>
+                  <span class="dep-path">{{ row.upstream_path }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="下游接口" min-width="200">
+                <template #default="{ row }">
+                  <span :class="['method-badge', `method-${row.downstream_method.toLowerCase()}`]">
+                    {{ row.downstream_method }}
+                  </span>
+                  <span class="dep-path">{{ row.downstream_path }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="映射数量" width="100" align="center">
+                <template #default="{ row }">
+                  <el-tag size="small">{{ parseMappings(row.field_mappings).length }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="创建时间" width="180">
+                <template #default="{ row }">
+                  {{ formatTime(row.created_at) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="150" fixed="right">
+                <template #default="{ row }">
+                  <el-button size="small" text @click="editDependency(row)">编辑</el-button>
+                  <el-button size="small" type="danger" text @click="deleteDependency(row)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-if="!dependencies.length" description="暂无依赖关系，点击右上角创建" />
+          </div>
+
+          <div class="section-divider"></div>
+
+          <div class="impact-section">
+            <div class="section-header">
+              <div class="section-title" style="margin:0">变更影响记录</div>
+            </div>
+
+            <el-table :data="impactReports" style="width: 100%">
+              <el-table-column label="变更接口" min-width="200">
+                <template #default="{ row }">
+                  <span :class="['method-badge', `method-${row.changed_api_method.toLowerCase()}`]">
+                    {{ row.changed_api_method }}
+                  </span>
+                  <span class="dep-path">{{ row.changed_api_path }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="change_type" label="变更类型" width="120">
+                <template #default="{ row }">
+                  <el-tag :type="getChangeTypeTag(row.change_type)" size="small">
+                    {{ getChangeTypeLabel(row.change_type) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="是否破坏性" width="100" align="center">
+                <template #default="{ row }">
+                  <el-tag v-if="row.has_breaking_change" type="danger" size="small">Breaking</el-tag>
+                  <el-tag v-else type="warning" size="small">Warning</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="受影响下游" width="100" align="center">
+                <template #default="{ row }">
+                  {{ parseAffected(row.affected_downstream).length }}
+                </template>
+              </el-table-column>
+              <el-table-column label="操作人" width="100">
+                <template #default="{ row }">
+                  {{ row.user_name }}
+                </template>
+              </el-table-column>
+              <el-table-column label="创建时间" width="180">
+                <template #default="{ row }">
+                  {{ formatTime(row.created_at) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="100" fixed="right">
+                <template #default="{ row }">
+                  <el-button size="small" text @click="viewReport(row)">查看详情</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-if="!impactReports.length" description="暂无变更影响记录" />
+          </div>
+        </el-tab-pane>
       </el-tabs>
     </div>
 
@@ -162,26 +281,109 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="showDepDialog"
+      :title="depDialogMode === 'create' ? '新建依赖关系' : '编辑依赖关系'"
+      width="700px"
+      :close-on-click-modal="false"
+    >
+      <el-form label-width="100px">
+        <el-form-item label="上游接口">
+          <el-select
+            v-model="depForm.upstream_api_id"
+            placeholder="请选择上游接口"
+            style="width: 100%"
+            :disabled="depDialogMode === 'edit'"
+          >
+            <el-option
+              v-for="api in apis"
+              :key="api.id"
+              :label="`${api.method} ${api.path}`"
+              :value="api.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="下游接口">
+          <el-select
+            v-model="depForm.downstream_api_id"
+            placeholder="请选择下游接口"
+            style="width: 100%"
+            :disabled="depDialogMode === 'edit'"
+          >
+            <el-option
+              v-for="api in apis"
+              :key="api.id"
+              :label="`${api.method} ${api.path}`"
+              :value="api.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="字段映射">
+          <div style="width: 100%">
+            <div
+              v-for="(mapping, idx) in depForm.field_mappings"
+              :key="idx"
+              class="mapping-row"
+            >
+              <el-input
+                v-model="mapping.upstreamField"
+                placeholder="上游响应字段 (如: data.id)"
+                style="flex: 1"
+              />
+              <span class="mapping-icon">→</span>
+              <el-input
+                v-model="mapping.downstreamField"
+                placeholder="下游请求字段 (如: body.userId)"
+                style="flex: 1"
+              />
+              <el-button
+                type="danger"
+                text
+                @click="removeMapping(idx)"
+                :disabled="depForm.field_mappings.length === 1"
+              >
+                删除
+              </el-button>
+            </div>
+            <el-button type="primary" text style="margin-top: 8px" @click="addMapping">
+              + 添加字段映射
+            </el-button>
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showDepDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveDependency">
+          {{ depDialogMode === 'create' ? '创建' : '保存' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch, inject, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { InfoFilled, UploadFilled, Document } from '@element-plus/icons-vue'
-import { apiDefAPI, activityAPI } from '../api'
+import { InfoFilled, UploadFilled, Document, Right } from '@element-plus/icons-vue'
+import { apiDefAPI, activityAPI, dependencyAPI, impactReportAPI } from '../api'
 import HealthMonitor from '../components/HealthMonitor.vue'
 
 const route = useRoute()
 const router = useRouter()
 const projectId = route.params.id
+const wsConnect = inject('wsConnect')
+const wsClose = inject('wsClose')
 
 const project = ref(null)
 const apis = ref([])
 const activities = ref([])
+const dependencies = ref([])
+const impactReports = ref([])
 const mockBaseUrl = window.location.origin
 const activeTab = ref('apis')
+const expandedDepRows = ref([])
 
 const showImportDialog = ref(false)
 const importTab = ref('paste')
@@ -195,6 +397,15 @@ const selectedFile = ref(null)
 const selectedFileName = ref('')
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024
+
+const showDepDialog = ref(false)
+const depDialogMode = ref('create')
+const editingDep = ref(null)
+const depForm = ref({
+  upstream_api_id: '',
+  downstream_api_id: '',
+  field_mappings: [{ upstreamField: '', downstreamField: '' }]
+})
 
 async function loadProject() {
   project.value = { id: projectId, name: '加载中...', description: '' }
@@ -290,6 +501,183 @@ function getMethodTagType(method) {
   return map[method] || ''
 }
 
+async function loadDependencies() {
+  try {
+    const res = await dependencyAPI.list(projectId)
+    dependencies.value = res.dependencies || []
+  } catch {}
+}
+
+async function loadImpactReports() {
+  try {
+    const res = await impactReportAPI.list(projectId)
+    impactReports.value = res.reports || []
+  } catch {}
+}
+
+function parseMappings(mappings) {
+  if (!mappings) return []
+  if (typeof mappings === 'string') {
+    try {
+      return JSON.parse(mappings)
+    } catch {
+      return []
+    }
+  }
+  return mappings
+}
+
+function parseAffected(affected) {
+  if (!affected) return []
+  if (typeof affected === 'string') {
+    try {
+      return JSON.parse(affected)
+    } catch {
+      return []
+    }
+  }
+  return affected
+}
+
+function getChangeTypeTag(type) {
+  const map = {
+    field_delete: 'danger',
+    type_change: 'danger',
+    field_rename: 'warning',
+    mixed: 'warning'
+  }
+  return map[type] || ''
+}
+
+function getChangeTypeLabel(type) {
+  const map = {
+    field_delete: '字段删除',
+    type_change: '类型变更',
+    field_rename: '字段重命名',
+    mixed: '混合变更'
+  }
+  return map[type] || type
+}
+
+function onDepExpandChange(row, expandedRows) {
+  expandedDepRows.value = expandedRows.map(r => r.id)
+}
+
+function openDepDialog(dep = null) {
+  if (dep) {
+    depDialogMode.value = 'edit'
+    editingDep.value = dep
+    depForm.value = {
+      upstream_api_id: dep.upstream_api_id,
+      downstream_api_id: dep.downstream_api_id,
+      field_mappings: [...parseMappings(dep.field_mappings)]
+    }
+  } else {
+    depDialogMode.value = 'create'
+    editingDep.value = null
+    depForm.value = {
+      upstream_api_id: '',
+      downstream_api_id: '',
+      field_mappings: [{ upstreamField: '', downstreamField: '' }]
+    }
+  }
+  showDepDialog.value = true
+}
+
+function editDependency(dep) {
+  openDepDialog(dep)
+}
+
+async function deleteDependency(dep) {
+  try {
+    await ElMessageBox.confirm('确定删除这条依赖关系？', '确认')
+    await dependencyAPI.delete(projectId, dep.id)
+    ElMessage.success('已删除')
+    loadDependencies()
+  } catch {}
+}
+
+function addMapping() {
+  depForm.value.field_mappings.push({ upstreamField: '', downstreamField: '' })
+}
+
+function removeMapping(idx) {
+  if (depForm.value.field_mappings.length > 1) {
+    depForm.value.field_mappings.splice(idx, 1)
+  }
+}
+
+async function saveDependency() {
+  try {
+    if (!depForm.value.upstream_api_id || !depForm.value.downstream_api_id) {
+      ElMessage.error('请选择上游和下游接口')
+      return
+    }
+    if (depForm.value.upstream_api_id === depForm.value.downstream_api_id) {
+      ElMessage.error('上游和下游接口不能相同')
+      return
+    }
+    const validMappings = depForm.value.field_mappings.filter(
+      m => m.upstreamField.trim() && m.downstreamField.trim()
+    )
+    if (validMappings.length === 0) {
+      ElMessage.error('请至少填写一组字段映射')
+      return
+    }
+
+    const data = {
+      upstream_api_id: depForm.value.upstream_api_id,
+      downstream_api_id: depForm.value.downstream_api_id,
+      field_mappings: validMappings
+    }
+
+    if (depDialogMode.value === 'create') {
+      await dependencyAPI.create(projectId, data)
+      ElMessage.success('创建成功')
+    } else {
+      await dependencyAPI.update(projectId, editingDep.value.id, { field_mappings: validMappings })
+      ElMessage.success('更新成功')
+    }
+
+    showDepDialog.value = false
+    loadDependencies()
+  } catch {}
+}
+
+function viewReport(report) {
+  ElMessageBox.alert(
+    `
+      <div style="text-align:left">
+        <p><strong>变更接口：</strong>${report.changed_api_method} ${report.changed_api_path}</p>
+        <p><strong>变更类型：</strong>${getChangeTypeLabel(report.change_type)}</p>
+        <p><strong>操作人：</strong>${report.user_name}</p>
+        <p><strong>变更字段：</strong></p>
+        <ul>
+          ${parseAffected(report.changed_fields).map(f => `
+            <li>${f.fieldPath} (${f.changeType === 'delete' ? '删除' : f.changeType === 'type_change' ? '类型变更：' + f.oldType + ' → ' + f.newType : '重命名：' + f.oldName + ' → ' + f.newName})</li>
+          `).join('')}
+        </ul>
+        <p><strong>受影响下游：</strong></p>
+        <ul>
+          ${parseAffected(report.affected_downstream).map(d => `
+            <li>
+              ${d.downstream_method} ${d.downstream_path}
+              <el-tag size="small" type="${d.impact_level === 'Breaking' ? 'danger' : 'warning'}" style="margin-left:8px">${d.impact_level}</el-tag>
+              <br/>
+              <span style="color:#909399;font-size:12px">受影响映射：${d.affected_mappings.join(', ')}</span>
+            </li>
+          `).join('')}
+        </ul>
+      </div>
+    `,
+    '影响报告详情',
+    {
+      dangerouslyUseHTMLString: true,
+      width: '600px'
+    }
+  )
+}
+
 async function doImport() {
   importError.value = ''
   importResult.value = null
@@ -335,7 +723,60 @@ async function doImport() {
   }
 }
 
-onMounted(() => { loadProject(); loadApis(); loadActivities() })
+watch(activeTab, (newTab) => {
+  if (newTab === 'dependency') {
+    loadDependencies()
+    loadImpactReports()
+  }
+})
+
+watch(() => route.query, (query) => {
+  if (query.tab === 'dependency') {
+    activeTab.value = 'dependency'
+    if (query.report) {
+      setTimeout(() => {
+        loadImpactReports().then(() => {
+          const report = impactReports.value.find(r => r.id === query.report)
+          if (report) {
+            viewReport(report)
+          }
+        })
+      }, 100)
+    }
+  }
+}, { immediate: true })
+
+function handleDependencyBreak(e) {
+  if (e.detail.projectId === projectId) {
+    loadImpactReports()
+    if (activeTab.value === 'dependency') {
+      loadImpactReports()
+    }
+  }
+}
+
+onMounted(() => {
+  loadProject()
+  loadApis()
+  loadActivities()
+
+  if (wsConnect) {
+    wsConnect(projectId)
+  }
+
+  window.addEventListener('dependency-break', handleDependencyBreak)
+
+  if (route.query.tab === 'dependency') {
+    activeTab.value = 'dependency'
+  }
+})
+
+onUnmounted(() => {
+  if (wsClose) {
+    wsClose(projectId)
+  }
+  window.removeEventListener('dependency-break', handleDependencyBreak)
+})
 </script>
 
 <style scoped>
@@ -515,5 +956,80 @@ onMounted(() => { loadProject(); loadApis(); loadActivities() })
 .error-text {
   color: #f56c6c;
   font-size: 12px;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.section-divider {
+  height: 1px;
+  background: #e4e7ed;
+  margin: 32px 0;
+}
+
+.dependency-section,
+.impact-section {
+  background: #fff;
+  border-radius: 8px;
+  padding: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.dep-path {
+  margin-left: 8px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-weight: 500;
+}
+
+.mapping-detail {
+  padding: 16px 24px;
+  background: #f5f7fa;
+  border-radius: 4px;
+}
+
+.mapping-title {
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #606266;
+}
+
+.mapping-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #fff;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
+.mapping-item:last-child {
+  margin-bottom: 0;
+}
+
+.mapping-arrow {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  color: #409eff;
+}
+
+.mapping-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.mapping-row:last-child {
+  margin-bottom: 0;
+}
+
+.mapping-icon {
+  color: #409eff;
+  font-weight: bold;
 }
 </style>

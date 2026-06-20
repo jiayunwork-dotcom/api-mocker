@@ -225,3 +225,62 @@ type AlertEvent struct {
 	LastStatusCode      int       `db:"last_status_code" json:"last_status_code"`
 	TriggeredAt         time.Time `db:"triggered_at" json:"triggered_at"`
 }
+
+type FieldMapping struct {
+	UpstreamField   string `json:"upstreamField"`
+	DownstreamField string `json:"downstreamField"`
+}
+
+type APIDependency struct {
+	ID              string         `db:"id" json:"id"`
+	ProjectID       string         `db:"project_id" json:"project_id"`
+	UpstreamAPIID   string         `db:"upstream_api_id" json:"upstream_api_id"`
+	DownstreamAPIID string         `db:"downstream_api_id" json:"downstream_api_id"`
+	FieldMappings   JSONB          `db:"field_mappings" json:"field_mappings"`
+	CreatedAt       time.Time      `db:"created_at" json:"created_at"`
+	UpdatedAt       time.Time      `db:"updated_at" json:"updated_at"`
+	UpstreamPath    string         `db:"upstream_path,omitempty" json:"upstream_path,omitempty"`
+	UpstreamMethod  string         `db:"upstream_method,omitempty" json:"upstream_method,omitempty"`
+	DownstreamPath  string         `db:"downstream_path,omitempty" json:"downstream_path,omitempty"`
+	DownstreamMethod string        `db:"downstream_method,omitempty" json:"downstream_method,omitempty"`
+}
+
+type ChangedField struct {
+	FieldPath  string `json:"fieldPath"`
+	OldType    string `json:"oldType,omitempty"`
+	NewType    string `json:"newType,omitempty"`
+	OldName    string `json:"oldName,omitempty"`
+	NewName    string `json:"newName,omitempty"`
+	ChangeType string `json:"changeType"`
+}
+
+type AffectedDownstream struct {
+	DownstreamAPIID   string   `json:"downstream_api_id"`
+	DownstreamPath    string   `json:"downstream_path"`
+	DownstreamMethod  string   `json:"downstream_method"`
+	AffectedMappings  []string `json:"affected_mappings"`
+	ImpactLevel       string   `json:"impact_level"`
+}
+
+type ImpactReport struct {
+	ID                string             `db:"id" json:"id"`
+	ProjectID         string             `db:"project_id" json:"project_id"`
+	ChangedAPIID      string             `db:"changed_api_id" json:"changed_api_id"`
+	ChangedAPIPath    string             `db:"changed_api_path" json:"changed_api_path"`
+	ChangedAPIMethod  string             `db:"changed_api_method" json:"changed_api_method"`
+	ChangeType        string             `db:"change_type" json:"change_type"`
+	ChangedFields     JSONB              `db:"changed_fields" json:"changed_fields"`
+	AffectedDownstream JSONB             `db:"affected_downstream" json:"affected_downstream"`
+	HasBreakingChange bool               `db:"has_breaking_change" json:"has_breaking_change"`
+	CreatedBy         string             `db:"created_by" json:"created_by"`
+	CreatedAt         time.Time          `db:"created_at" json:"created_at"`
+	UserName          string             `db:"user_name,omitempty" json:"user_name,omitempty"`
+}
+
+type DependencyBreakMessage struct {
+	EventType         string `json:"eventType"`
+	ChangedAPIPath    string `json:"changedApiPath"`
+	AffectedCount     int    `json:"affectedCount"`
+	ReportID          string `json:"reportId"`
+	ProjectID         string `json:"projectId"`
+}

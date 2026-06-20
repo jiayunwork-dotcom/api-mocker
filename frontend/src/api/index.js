@@ -117,15 +117,19 @@ export const activityAPI = {
 }
 
 export const probeAPI = {
-  list: (projectId) => api.get(`/projects/${projectId}/probes`),
+  list: (projectId, params) => api.get(`/projects/${projectId}/probes`, { params }),
   create: (projectId, data) => api.post(`/projects/${projectId}/probes`, data),
   get: (projectId, probeId) => api.get(`/projects/${projectId}/probes/${probeId}`),
   update: (projectId, probeId, data) => api.put(`/projects/${projectId}/probes/${probeId}`, data),
   delete: (projectId, probeId) => api.delete(`/projects/${projectId}/probes/${probeId}`),
-  dashboard: (projectId) => api.get(`/projects/${projectId}/probes/dashboard`),
+  dashboard: (projectId, params) => api.get(`/projects/${projectId}/probes/dashboard`, { params }),
   alerts: (projectId) => api.get(`/projects/${projectId}/probes/alerts`),
   getForAPI: (projectId, apiId) => api.get(`/projects/${projectId}/apis/${apiId}/probe`),
-  createForAPI: (projectId, apiId, data) => api.post(`/projects/${projectId}/apis/${apiId}/probe`, data)
+  createForAPI: (projectId, apiId, data) => api.post(`/projects/${projectId}/apis/${apiId}/probe`, data),
+  batchEnable: (projectId, data) => api.post(`/projects/${projectId}/probes/batch/enable`, data),
+  batchDisable: (projectId, data) => api.post(`/projects/${projectId}/probes/batch/disable`, data),
+  batchDelete: (projectId, data) => api.post(`/projects/${projectId}/probes/batch/delete`, data),
+  availabilityTrend: (projectId, probeId) => api.get(`/projects/${projectId}/probes/${probeId}/availability-trend`)
 }
 
 export default api

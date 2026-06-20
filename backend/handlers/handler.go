@@ -6,6 +6,7 @@ import (
 
 	"api-mocker/config"
 	"api-mocker/probe"
+	"api-mocker/websocket"
 )
 
 type Handler struct {
@@ -13,8 +14,9 @@ type Handler struct {
 	rdb       *redis.Client
 	cfg       *config.Config
 	scheduler *probe.Scheduler
+	wsHub     *websocket.Hub
 }
 
-func New(db *sqlx.DB, rdb *redis.Client, cfg *config.Config, scheduler *probe.Scheduler) *Handler {
-	return &Handler{db: db, rdb: rdb, cfg: cfg, scheduler: scheduler}
+func New(db *sqlx.DB, rdb *redis.Client, cfg *config.Config, scheduler *probe.Scheduler, wsHub *websocket.Hub) *Handler {
+	return &Handler{db: db, rdb: rdb, cfg: cfg, scheduler: scheduler, wsHub: wsHub}
 }

@@ -16,8 +16,25 @@
     </div>
 
     <div class="toolbar">
-      <el-button type="primary" size="small" @click="showAddProbe = true">添加探针</el-button>
-      <span class="toolbar-hint">点击状态卡片可筛选，已启用 {{ enabledCount }}/20</span>
+      <div class="toolbar-left">
+        <el-button type="primary" size="small" @click="showAddProbe = true">添加探针</el-button>
+        <span class="toolbar-hint">已启用 {{ enabledCount }}/20</span>
+      </div>
+      <div class="group-filter">
+        <span class="filter-label">分组筛选:</span>
+        <el-radio-group v-model="filterGroup" size="small" @change="loadDashboard">
+          <el-radio-button label="">全部</el-radio-button>
+          <el-radio-button v-for="g in dashboard.groups || []" :key="g" :label="g">{{ g }}</el-radio-button>
+        </el-radio-group>
+      </div>
+    </div>
+
+    <div class="batch-bar" v-if="selectedProbes.length > 0">
+      <span class="batch-info">已选择 {{ selectedProbes.length }} 项</span>
+      <el-button size="small" type="success" @click="handleBatchEnable">批量启用</el-button>
+      <el-button size="small" type="warning" @click="handleBatchDisable">批量禁用</el-button>
+      <el-button size="small" type="danger" @click="handleBatchDelete">批量删除</el-button>
+      <el-button size="small" @click="clearSelection">取消选择</el-button>
     </div>
 
     <el-table
@@ -27,7 +44,10 @@
       @row-click="toggleExpand"
       :row-class-name="getRowClass"
       :expand-row-keys="expandedRows"
+      ref="probeTable"
+      @selection-change="handleSelectionChange"
     >
+      <el-table-column type="selection" width="50" @click.stop />
       <el-table-column type="expand">
         <template #default="{ row }">
           <div class="expand-content" v-if="detailData[row.id]">
@@ -37,6 +57,18 @@
                 <div class="chart-container" :ref="el => setChartRef(row.id, el)">
                   <canvas :id="'chart-' + row.id" width="700" height="200"></canvas>
                 </div>
+              </div>
+            </div>
+            <div class="detail-section">
+              <h4>24小时可用率趋势</h4>
+              <div class="availability-chart">
+                <div class="chart-container" :ref="el => setAvailabilityChartRef(row.id, el)">
+                  <canvas :id="'availability-chart-' + row.id" width="700" height="180"></canvas>
+                </div>
+              </div>
+              <div class="availability-summary" v-if="availabilityData[row.id]">
+                最近24小时整体可用率: <strong>{{ availabilityData[row.id].overallRate?.toFixed?.(2) || 0 }}%</strong>
+                （共 {{ availabilityData[row.id].totalCount || 0 }} 次探测，成功 {{ availabilityData[row.id].successCount || 0 }} 次）
               </div>
             </div>
             <div class="detail-section">
@@ -65,8 +97,11 @@
             <div class="detail-section">
               <h4>探针配置</h4>
               <div class="config-row">
+                <span>分组: <strong>{{ getProbeConfig(row.id)?.group_name || '未分组' }}</strong></span>
                 <span>检查间隔: <strong>{{ getProbeConfig(row.id)?.interval_seconds }}s</strong></span>
                 <span>超时阈值: <strong>{{ getProbeConfig(row.id)?.timeout_ms }}ms</strong></span>
+              </div>
+              <div class="config-row">
                 <span>连续失败标记异常: <strong>{{ getProbeConfig(row.id)?.fail_threshold }}次</strong></span>
                 <span>连续成功恢复: <strong>{{ getProbeConfig(row.id)?.recover_threshold }}次</strong></span>
               </div>
@@ -90,6 +125,7 @@
         <template #default="{ row }">
           <span class="api-path-text">{{ row.apiPath }}</span>
           <span v-if="row.apiDescription" class="api-desc-text">{{ row.apiDescription }}</span>
+          <el-tag v-if="row.groupName" size="small" type="info" class="group-tag">{{ row.groupName }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="状态" width="100" align="center">
@@ -143,6 +179,9 @@
             />
           </el-select>
         </el-form-item>
+        <el-form-item label="分组名称">
+          <el-input v-model="addForm.groupName" placeholder="可选，例如：核心接口" />
+        </el-form-item>
         <el-form-item label="启用探针">
           <el-switch v-model="addForm.enabled" />
         </el-form-item>
@@ -167,6 +206,9 @@
 
     <el-dialog v-model="showEditProbe" title="编辑探针配置" width="480px" :close-on-click-modal="false">
       <el-form :model="editForm" label-width="120px" size="default" v-if="editForm">
+        <el-form-item label="分组名称">
+          <el-input v-model="editForm.groupName" placeholder="可选，留空表示未分组" />
+        </el-form-item>
         <el-form-item label="检查间隔(秒)">
           <el-input-number v-model="editForm.intervalSeconds" :min="10" :max="300" :step="10" />
         </el-form-item>
@@ -198,13 +240,17 @@ const props = defineProps({
   projectId: { type: String, required: true }
 })
 
-const dashboard = ref({ summary: {}, probes: [] })
+const dashboard = ref({ summary: {}, probes: [], groups: [] })
 const allProbes = ref([])
 const allAPIs = ref([])
 const filterStatus = ref('')
+const filterGroup = ref('')
 const expandedRows = ref([])
 const detailData = ref({})
 const chartRefs = ref({})
+const availabilityChartRefs = ref({})
+const availabilityData = ref({})
+const selectedProbes = ref([])
 
 const showAddProbe = ref(false)
 const showEditProbe = ref(false)
@@ -213,6 +259,7 @@ const saving = ref(false)
 const addForm = ref({
   apiId: '',
   enabled: false,
+  groupName: '',
   intervalSeconds: 30,
   timeoutMs: 3000,
   failThreshold: 3,
@@ -223,12 +270,16 @@ const editForm = ref(null)
 const editingProbeId = ref('')
 
 let refreshTimer = null
+let ws = null
 
 const enabledCount = computed(() => dashboard.value.probes?.filter(p => p.enabled).length || 0)
 
 const filteredProbes = computed(() => {
-  if (!filterStatus.value) return dashboard.value.probes || []
-  return (dashboard.value.probes || []).filter(p => p.status === filterStatus.value)
+  let list = dashboard.value.probes || []
+  if (filterStatus.value) {
+    list = list.filter(p => p.status === filterStatus.value)
+  }
+  return list
 })
 
 const availableAPIs = computed(() => {
@@ -240,16 +291,28 @@ function setChartRef(probeId, el) {
   if (el) chartRefs.value[probeId] = el
 }
 
+function setAvailabilityChartRef(probeId, el) {
+  if (el) availabilityChartRefs.value[probeId] = el
+}
+
 async function loadDashboard() {
   try {
-    const res = await probeAPI.dashboard(props.projectId)
+    const params = {}
+    if (filterGroup.value) {
+      params.groupName = filterGroup.value
+    }
+    const res = await probeAPI.dashboard(props.projectId, params)
     dashboard.value = res
   } catch {}
 }
 
 async function loadAllProbes() {
   try {
-    const res = await probeAPI.list(props.projectId)
+    const params = {}
+    if (filterGroup.value) {
+      params.groupName = filterGroup.value
+    }
+    const res = await probeAPI.list(props.projectId, params)
     allProbes.value = res.probes || []
   } catch {}
 }
@@ -277,6 +340,16 @@ async function loadProbeDetail(probeId) {
     detailData.value[probeId] = { records: res.records || [], alerts: res.alerts || [] }
     await nextTick()
     drawChart(probeId)
+    loadAvailabilityTrend(probeId)
+  } catch {}
+}
+
+async function loadAvailabilityTrend(probeId) {
+  try {
+    const res = await probeAPI.availabilityTrend(props.projectId, probeId)
+    availabilityData.value[probeId] = res
+    await nextTick()
+    drawAvailabilityChart(probeId)
   } catch {}
 }
 
@@ -353,6 +426,88 @@ function drawChart(probeId) {
   }
 }
 
+function drawAvailabilityChart(probeId) {
+  const canvas = document.getElementById('availability-chart-' + probeId)
+  if (!canvas) return
+
+  const data = availabilityData.value[probeId]?.hours || []
+  if (!data.length) return
+
+  const ctx = canvas.getContext('2d')
+  const W = canvas.width
+  const H = canvas.height
+  const padL = 50, padR = 20, padT = 20, padB = 40
+  const chartW = W - padL - padR
+  const chartH = H - padT - padB
+
+  ctx.clearRect(0, 0, W, H)
+
+  ctx.strokeStyle = '#e8e8e8'
+  ctx.lineWidth = 1
+  ctx.font = '11px sans-serif'
+  ctx.fillStyle = '#999'
+  ctx.textAlign = 'right'
+
+  const yTicks = [0, 25, 50, 75, 100]
+  yTicks.forEach((val, i) => {
+    const y = padT + (chartH / 4) * (4 - i)
+    ctx.beginPath()
+    ctx.moveTo(padL, y)
+    ctx.lineTo(W - padR, y)
+    ctx.stroke()
+    ctx.fillText(val + '%', padL - 6, y + 4)
+  })
+
+  const step = chartW / Math.max(data.length - 1, 1)
+
+  ctx.beginPath()
+  ctx.strokeStyle = '#67c23a'
+  ctx.lineWidth = 2
+  let isFirstPoint = true
+  let prevHasData = false
+
+  data.forEach((d, i) => {
+    const x = padL + step * i
+    const y = padT + chartH * (1 - (d.successRate || 0) / 100)
+
+    if (d.hasData) {
+      if (isFirstPoint || !prevHasData) {
+        ctx.moveTo(x, y)
+        isFirstPoint = false
+      } else {
+        ctx.lineTo(x, y)
+      }
+      prevHasData = true
+    } else {
+      prevHasData = false
+      isFirstPoint = true
+    }
+  })
+  ctx.stroke()
+
+  data.forEach((d, i) => {
+    if (!d.hasData) return
+    const x = padL + step * i
+    const y = padT + chartH * (1 - (d.successRate || 0) / 100)
+    ctx.beginPath()
+    ctx.arc(x, y, 3, 0, Math.PI * 2)
+    ctx.fillStyle = d.successRate >= 95 ? '#67c23a' : d.successRate >= 80 ? '#e6a23c' : '#f56c6c'
+    ctx.fill()
+  })
+
+  ctx.fillStyle = '#999'
+  ctx.textAlign = 'center'
+  ctx.font = '10px sans-serif'
+  const labelInterval = Math.max(1, Math.floor(data.length / 6))
+  data.forEach((d, i) => {
+    if (i % labelInterval === 0 || i === data.length - 1) {
+      const x = padL + step * i
+      const hour = d.hour.split(' ')[1]?.split(':')[0] || ''
+      ctx.fillText(hour + '时', x, H - padB + 18)
+    }
+  })
+}
+
 async function handleAddProbe() {
   if (!addForm.value.apiId) {
     ElMessage.warning('请选择要监控的接口')
@@ -363,6 +518,7 @@ async function handleAddProbe() {
     await probeAPI.create(props.projectId, {
       apiId: addForm.value.apiId,
       enabled: addForm.value.enabled,
+      groupName: addForm.value.groupName,
       intervalSeconds: addForm.value.intervalSeconds,
       timeoutMs: addForm.value.timeoutMs,
       failThreshold: addForm.value.failThreshold,
@@ -370,7 +526,7 @@ async function handleAddProbe() {
     })
     ElMessage.success('探针已创建')
     showAddProbe.value = false
-    addForm.value = { apiId: '', enabled: false, intervalSeconds: 30, timeoutMs: 3000, failThreshold: 3, recoverThreshold: 2 }
+    addForm.value = { apiId: '', enabled: false, groupName: '', intervalSeconds: 30, timeoutMs: 3000, failThreshold: 3, recoverThreshold: 2 }
     loadDashboard()
     loadAllProbes()
   } catch (err) {
@@ -386,6 +542,7 @@ function openEditProbe(row) {
   if (!cfg) return
   editingProbeId.value = row.id
   editForm.value = {
+    groupName: cfg.group_name || '',
     intervalSeconds: cfg.interval_seconds,
     timeoutMs: cfg.timeout_ms,
     failThreshold: cfg.fail_threshold,
@@ -435,6 +592,62 @@ async function toggleProbe(row, val) {
   }
 }
 
+function handleSelectionChange(selection) {
+  selectedProbes.value = selection
+}
+
+function clearSelection() {
+  selectedProbes.value = []
+}
+
+async function handleBatchEnable() {
+  if (!selectedProbes.value.length) return
+  try {
+    const probeIds = selectedProbes.value.map(p => p.id)
+    const res = await probeAPI.batchEnable(props.projectId, { probeIds })
+    let msg = `操作完成：成功 ${res.success} 条`
+    if (res.skipped > 0) {
+      msg += `，跳过 ${res.skipped} 条（部分因项目活跃探针达到20上限）`
+    }
+    if (res.failed > 0) {
+      msg += `，失败 ${res.failed} 条`
+    }
+    ElMessage.success(msg)
+    loadDashboard()
+    loadAllProbes()
+    clearSelection()
+  } catch (err) {
+    ElMessage.error(err.response?.data?.error || '操作失败')
+  }
+}
+
+async function handleBatchDisable() {
+  if (!selectedProbes.value.length) return
+  try {
+    const probeIds = selectedProbes.value.map(p => p.id)
+    const res = await probeAPI.batchDisable(props.projectId, { probeIds })
+    ElMessage.success(`操作完成：成功 ${res.success} 条，跳过 ${res.skipped} 条，失败 ${res.failed} 条`)
+    loadDashboard()
+    loadAllProbes()
+    clearSelection()
+  } catch (err) {
+    ElMessage.error(err.response?.data?.error || '操作失败')
+  }
+}
+
+async function handleBatchDelete() {
+  if (!selectedProbes.value.length) return
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${selectedProbes.value.length} 条探针？`, '确认批量删除', { type: 'warning' })
+    const probeIds = selectedProbes.value.map(p => p.id)
+    const res = await probeAPI.batchDelete(props.projectId, { probeIds })
+    ElMessage.success(`操作完成：成功 ${res.success} 条，失败 ${res.failed} 条`)
+    loadDashboard()
+    loadAllProbes()
+    clearSelection()
+  } catch {}
+}
+
 function getProbeConfig(probeId) {
   return allProbes.value.find(p => p.id === probeId)
 }
@@ -463,16 +676,80 @@ function getRowClass({ row }) {
   return `row-status-${row.status || 'unknown'}`
 }
 
+function connectWebSocket() {
+  if (ws) {
+    ws.close()
+  }
+
+  const token = localStorage.getItem('token')
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = `${protocol}//${window.location.host}/api/projects/${props.projectId}/probes/ws`
+
+  try {
+    ws = new WebSocket(wsUrl)
+    if (token) {
+      ws.binaryType = 'arraybuffer'
+    }
+
+    ws.onopen = () => {
+      console.log('[WebSocket] Connected')
+    }
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.eventType === 'status_change') {
+          handleStatusChange(data)
+        }
+      } catch (e) {
+        console.error('[WebSocket] Parse error:', e)
+      }
+    }
+
+    ws.onclose = () => {
+      console.log('[WebSocket] Disconnected')
+    }
+
+    ws.onerror = (err) => {
+      console.error('[WebSocket] Error:', err)
+    }
+  } catch (e) {
+    console.error('[WebSocket] Connection failed:', e)
+  }
+}
+
+function handleStatusChange(data) {
+  const probes = dashboard.value.probes || []
+  const probe = probes.find(p => p.id === data.probeId)
+
+  if (probe) {
+    const oldStatus = probe.status
+    probe.status = data.newStatus
+    probe.lastResponseMs = data.lastResponseMs
+    probe.lastCheckTime = data.triggeredAt
+
+    const summary = dashboard.value.summary || {}
+    if (summary[oldStatus] !== undefined) {
+      summary[oldStatus] = Math.max(0, summary[oldStatus] - 1)
+    }
+    if (summary[data.newStatus] !== undefined) {
+      summary[data.newStatus] = (summary[data.newStatus] || 0) + 1
+    }
+  }
+}
+
 watch(() => props.projectId, () => {
   loadDashboard()
   loadAllProbes()
   loadAPIs()
+  connectWebSocket()
 })
 
 onMounted(() => {
   loadDashboard()
   loadAllProbes()
   loadAPIs()
+  connectWebSocket()
   refreshTimer = setInterval(() => {
     loadDashboard()
     loadAllProbes()
@@ -481,6 +758,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (refreshTimer) clearInterval(refreshTimer)
+  if (ws) ws.close()
 })
 </script>
 
@@ -547,9 +825,43 @@ onBeforeUnmount(() => {
   margin-bottom: 16px;
 }
 
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .toolbar-hint {
   font-size: 13px;
   color: #909399;
+}
+
+.group-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-label {
+  font-size: 13px;
+  color: #606266;
+}
+
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: #ecf5ff;
+  border: 1px solid #d9ecff;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.batch-info {
+  font-size: 13px;
+  color: #409eff;
+  margin-right: 8px;
 }
 
 .api-path-text {
@@ -561,6 +873,10 @@ onBeforeUnmount(() => {
 .api-desc-text {
   color: #999;
   font-size: 12px;
+  margin-left: 8px;
+}
+
+.group-tag {
   margin-left: 8px;
 }
 
@@ -602,8 +918,21 @@ onBeforeUnmount(() => {
   overflow-x: auto;
 }
 
-.timeline-chart canvas {
+.timeline-chart canvas,
+.availability-chart canvas {
   display: block;
+}
+
+.availability-summary {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #606266;
+  text-align: center;
+}
+
+.availability-summary strong {
+  color: #67c23a;
+  font-size: 15px;
 }
 
 .config-row {

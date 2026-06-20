@@ -15,11 +15,13 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"api-mocker/models"
+	ws "api-mocker/websocket"
 )
 
 type Scheduler struct {
 	db       *sqlx.DB
 	mockURL  string
+	hub      *ws.Hub
 	mu       sync.RWMutex
 	probes   map[string]*probeWorker
 	stopCh   chan struct{}
@@ -33,10 +35,11 @@ type probeWorker struct {
 	running  bool
 }
 
-func NewScheduler(db *sqlx.DB, mockURL string) *Scheduler {
+func NewScheduler(db *sqlx.DB, mockURL string, hub *ws.Hub) *Scheduler {
 	return &Scheduler{
 		db:      db,
 		mockURL: mockURL,
+		hub:     hub,
 		probes:  make(map[string]*probeWorker),
 		stopCh:  make(chan struct{}),
 		cleanCh: make(chan struct{}),
@@ -329,8 +332,12 @@ func (s *Scheduler) updateStateMachine(cfg models.ProbeConfig, isSuccess bool, s
 func (s *Scheduler) createAlertEvent(cfg models.ProbeConfig, oldStatus, newStatus string, statusCode, responseTimeMs int) {
 	var api models.API
 	probeName := cfg.ID
+	apiPath := ""
+	apiMethod := ""
 	if err := s.db.Get(&api, "SELECT * FROM apis WHERE id = $1", cfg.APIID); err == nil {
 		probeName = fmt.Sprintf("%s %s", api.Method, api.Path)
+		apiPath = api.Path
+		apiMethod = api.Method
 	}
 
 	event := models.AlertEvent{
@@ -352,6 +359,19 @@ func (s *Scheduler) createAlertEvent(cfg models.ProbeConfig, oldStatus, newStatu
 	)
 	if err != nil {
 		log.Printf("[probe] Error creating alert event: %v", err)
+	}
+
+	if s.hub != nil {
+		msg := ws.StatusChangeMessage{
+			ProbeID:        cfg.ID,
+			APIPath:        apiPath,
+			APIMethod:      apiMethod,
+			OldStatus:      oldStatus,
+			NewStatus:      newStatus,
+			TriggeredAt:    event.TriggeredAt.Format("2006-01-02T15:04:05Z07:00"),
+			LastResponseMs: responseTimeMs,
+		}
+		s.hub.BroadcastStatusChange(cfg.ProjectID, msg)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"api-mocker/handlers"
 	"api-mocker/middleware"
 	"api-mocker/probe"
+	"api-mocker/websocket"
 )
 
 func requestSizeLimitMiddleware(maxSize int64) gin.HandlerFunc {
@@ -38,7 +39,9 @@ func main() {
 
 	rdb := cache.Connect(cfg)
 
-	scheduler := probe.NewScheduler(db, cfg.MockBaseURL)
+	wsHub := websocket.NewHub()
+
+	scheduler := probe.NewScheduler(db, cfg.MockBaseURL, wsHub)
 	scheduler.Start()
 	defer scheduler.Stop()
 
@@ -58,7 +61,7 @@ func main() {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
-	h := handlers.New(db, rdb, cfg, scheduler)
+	h := handlers.New(db, rdb, cfg, scheduler, wsHub)
 
 	api := r.Group("/api")
 	{
@@ -131,11 +134,16 @@ func main() {
 
 			probes := auth.Group("/projects/:projectId/probes")
 			{
+				probes.GET("/ws", h.ProbeWebSocket)
 				probes.GET("", h.ListProbes)
 				probes.POST("", h.CreateProbe)
+				probes.POST("/batch/enable", h.BatchEnableProbes)
+				probes.POST("/batch/disable", h.BatchDisableProbes)
+				probes.POST("/batch/delete", h.BatchDeleteProbes)
 				probes.GET("/dashboard", h.GetProbeDashboard)
 				probes.GET("/alerts", h.GetProbeAlerts)
 				probes.GET("/:probeId", h.GetProbeDetail)
+				probes.GET("/:probeId/availability-trend", h.GetProbeAvailabilityTrend)
 				probes.PUT("/:probeId", h.UpdateProbe)
 				probes.DELETE("/:probeId", h.DeleteProbe)
 			}

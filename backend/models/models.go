@@ -193,6 +193,7 @@ type ProbeConfig struct {
 	APIID               string    `db:"api_id" json:"api_id"`
 	ProjectID           string    `db:"project_id" json:"project_id"`
 	Enabled             bool      `db:"enabled" json:"enabled"`
+	GroupName           string    `db:"group_name" json:"group_name"`
 	IntervalSeconds     int       `db:"interval_seconds" json:"interval_seconds"`
 	TimeoutMs           int       `db:"timeout_ms" json:"timeout_ms"`
 	FailThreshold       int       `db:"fail_threshold" json:"fail_threshold"`

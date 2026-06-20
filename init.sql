@@ -118,6 +118,7 @@ CREATE TABLE probe_configs (
     api_id UUID NOT NULL REFERENCES apis(id) ON DELETE CASCADE,
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    group_name VARCHAR(100) NOT NULL DEFAULT '',
     interval_seconds INT NOT NULL DEFAULT 30 CHECK (interval_seconds >= 10 AND interval_seconds <= 300),
     timeout_ms INT NOT NULL DEFAULT 3000 CHECK (timeout_ms > 0),
     fail_threshold INT NOT NULL DEFAULT 3 CHECK (fail_threshold > 0),

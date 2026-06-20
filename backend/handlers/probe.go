@@ -2,15 +2,18 @@ package handlers
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	"api-mocker/models"
+	ws "api-mocker/websocket"
 )
 
 func (h *Handler) ListProbes(c *gin.Context) {
 	projectID := c.Param("projectId")
+	groupName := c.Query("groupName")
 
 	if !h.canAccessProject(c, projectID) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "No access to project"})
@@ -18,10 +21,19 @@ func (h *Handler) ListProbes(c *gin.Context) {
 	}
 
 	var probes []models.ProbeConfig
-	err := h.db.Select(&probes,
-		"SELECT * FROM probe_configs WHERE project_id = $1 ORDER BY created_at ASC",
-		projectID,
-	)
+	var err error
+
+	if groupName != "" {
+		err = h.db.Select(&probes,
+			"SELECT * FROM probe_configs WHERE project_id = $1 AND group_name = $2 ORDER BY created_at ASC",
+			projectID, groupName,
+		)
+	} else {
+		err = h.db.Select(&probes,
+			"SELECT * FROM probe_configs WHERE project_id = $1 ORDER BY created_at ASC",
+			projectID,
+		)
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list probes"})
 		return
@@ -42,6 +54,7 @@ func (h *Handler) CreateProbe(c *gin.Context) {
 	var req struct {
 		APIID            string `json:"apiId" binding:"required"`
 		Enabled          bool   `json:"enabled"`
+		GroupName        string `json:"groupName"`
 		IntervalSeconds  int    `json:"intervalSeconds"`
 		TimeoutMs        int    `json:"timeoutMs"`
 		FailThreshold    int    `json:"failThreshold"`
@@ -105,23 +118,24 @@ func (h *Handler) CreateProbe(c *gin.Context) {
 	}
 
 	probe := models.ProbeConfig{
-		ID:                  uuid.New().String(),
-		APIID:               req.APIID,
-		ProjectID:           projectID,
-		Enabled:             req.Enabled,
-		IntervalSeconds:     intervalSeconds,
-		TimeoutMs:           timeoutMs,
-		FailThreshold:       failThreshold,
-		RecoverThreshold:    recoverThreshold,
-		Status:              "healthy",
-		ConsecutiveFailures: 0,
+		ID:                   uuid.New().String(),
+		APIID:                req.APIID,
+		ProjectID:            projectID,
+		Enabled:              req.Enabled,
+		GroupName:            req.GroupName,
+		IntervalSeconds:      intervalSeconds,
+		TimeoutMs:            timeoutMs,
+		FailThreshold:        failThreshold,
+		RecoverThreshold:     recoverThreshold,
+		Status:               "healthy",
+		ConsecutiveFailures:  0,
 		ConsecutiveSuccesses: 0,
 	}
 
 	_, err = h.db.Exec(
-		`INSERT INTO probe_configs (id, api_id, project_id, enabled, interval_seconds, timeout_ms, fail_threshold, recover_threshold, status, consecutive_failures, consecutive_successes)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-		probe.ID, probe.APIID, probe.ProjectID, probe.Enabled,
+		`INSERT INTO probe_configs (id, api_id, project_id, enabled, group_name, interval_seconds, timeout_ms, fail_threshold, recover_threshold, status, consecutive_failures, consecutive_successes)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		probe.ID, probe.APIID, probe.ProjectID, probe.Enabled, probe.GroupName,
 		probe.IntervalSeconds, probe.TimeoutMs, probe.FailThreshold, probe.RecoverThreshold,
 		probe.Status, probe.ConsecutiveFailures, probe.ConsecutiveSuccesses,
 	)
@@ -155,11 +169,12 @@ func (h *Handler) UpdateProbe(c *gin.Context) {
 	}
 
 	var req struct {
-		Enabled          *bool `json:"enabled"`
-		IntervalSeconds  int   `json:"intervalSeconds"`
-		TimeoutMs        int   `json:"timeoutMs"`
-		FailThreshold    int   `json:"failThreshold"`
-		RecoverThreshold int   `json:"recoverThreshold"`
+		Enabled          *bool   `json:"enabled"`
+		GroupName        *string `json:"groupName"`
+		IntervalSeconds  int     `json:"intervalSeconds"`
+		TimeoutMs        int     `json:"timeoutMs"`
+		FailThreshold    int     `json:"failThreshold"`
+		RecoverThreshold int     `json:"recoverThreshold"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -169,6 +184,11 @@ func (h *Handler) UpdateProbe(c *gin.Context) {
 	enabled := old.Enabled
 	if req.Enabled != nil {
 		enabled = *req.Enabled
+	}
+
+	groupName := old.GroupName
+	if req.GroupName != nil {
+		groupName = *req.GroupName
 	}
 
 	if enabled && !old.Enabled {
@@ -210,8 +230,8 @@ func (h *Handler) UpdateProbe(c *gin.Context) {
 	}
 
 	_, err = h.db.Exec(
-		`UPDATE probe_configs SET enabled = $1, interval_seconds = $2, timeout_ms = $3, fail_threshold = $4, recover_threshold = $5, updated_at = NOW() WHERE id = $6`,
-		enabled, intervalSeconds, timeoutMs, failThreshold, recoverThreshold, probeID,
+		`UPDATE probe_configs SET enabled = $1, group_name = $2, interval_seconds = $3, timeout_ms = $4, fail_threshold = $5, recover_threshold = $6, updated_at = NOW() WHERE id = $7`,
+		enabled, groupName, intervalSeconds, timeoutMs, failThreshold, recoverThreshold, probeID,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update probe"})
@@ -259,6 +279,7 @@ func (h *Handler) DeleteProbe(c *gin.Context) {
 
 func (h *Handler) GetProbeDashboard(c *gin.Context) {
 	projectID := c.Param("projectId")
+	groupName := c.Query("groupName")
 
 	if !h.canAccessProject(c, projectID) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "No access to project"})
@@ -273,32 +294,50 @@ func (h *Handler) GetProbeDashboard(c *gin.Context) {
 	}
 
 	var probes []ProbeWithAPI
-	err := h.db.Select(&probes, `
+	var err error
+
+	queryBase := `
 		SELECT pc.*, a.path as api_path, a.method as api_method, a.description as api_description
 		FROM probe_configs pc
 		JOIN apis a ON pc.api_id = a.id
 		WHERE pc.project_id = $1
-		ORDER BY pc.created_at ASC
-	`, projectID)
+	`
+	if groupName != "" {
+		err = h.db.Select(&probes, queryBase+` AND pc.group_name = $2 ORDER BY pc.created_at ASC`,
+			projectID, groupName,
+		)
+	} else {
+		err = h.db.Select(&probes, queryBase+` ORDER BY pc.created_at ASC`,
+			projectID,
+		)
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load probes"})
 		return
 	}
+
+	var groups []string
+	h.db.Select(&groups, `
+		SELECT DISTINCT group_name FROM probe_configs
+		WHERE project_id = $1 AND group_name != ''
+		ORDER BY group_name ASC
+	`, projectID)
 
 	healthyCount := 0
 	degradedCount := 0
 	unhealthyCount := 0
 
 	type ProbeSummary struct {
-		ID              string `json:"id"`
-		APIPath         string `json:"apiPath"`
-		APIMethod       string `json:"apiMethod"`
-		APIDescription  string `json:"apiDescription"`
-		Status          string `json:"status"`
-		Enabled         bool   `json:"enabled"`
-		LastCheckTime   string `json:"lastCheckTime"`
-		LastResponseMs  int    `json:"lastResponseMs"`
-		AvgResponseMs   int    `json:"avgResponseMs"`
+		ID              string  `json:"id"`
+		APIPath         string  `json:"apiPath"`
+		APIMethod       string  `json:"apiMethod"`
+		APIDescription  string  `json:"apiDescription"`
+		GroupName       string  `json:"groupName"`
+		Status          string  `json:"status"`
+		Enabled         bool    `json:"enabled"`
+		LastCheckTime   string  `json:"lastCheckTime"`
+		LastResponseMs  int     `json:"lastResponseMs"`
+		AvgResponseMs   int     `json:"avgResponseMs"`
 		SuccessRate     float64 `json:"successRate"`
 	}
 
@@ -363,6 +402,7 @@ func (h *Handler) GetProbeDashboard(c *gin.Context) {
 			APIPath:        p.APIPath,
 			APIMethod:      p.APIMethod,
 			APIDescription: p.APIDescription,
+			GroupName:      p.GroupName,
 			Status:         p.Status,
 			Enabled:        p.Enabled,
 			LastCheckTime:  lastCheckTime,
@@ -378,6 +418,7 @@ func (h *Handler) GetProbeDashboard(c *gin.Context) {
 			"degraded":  degradedCount,
 			"unhealthy": unhealthyCount,
 		},
+		"groups": groups,
 		"probes": summaries,
 	})
 }
@@ -438,6 +479,101 @@ func (h *Handler) GetProbeDetail(c *gin.Context) {
 	})
 }
 
+func (h *Handler) GetProbeAvailabilityTrend(c *gin.Context) {
+	projectID := c.Param("projectId")
+	probeID := c.Param("probeId")
+
+	if !h.canAccessProject(c, projectID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "No access to project"})
+		return
+	}
+
+	var probe models.ProbeConfig
+	err := h.db.Get(&probe, "SELECT * FROM probe_configs WHERE id = $1 AND project_id = $2", probeID, projectID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Probe not found"})
+		return
+	}
+
+	type HourlyStat struct {
+		Hour       string  `db:"hour" json:"hour"`
+		TotalCnt   int     `db:"total_cnt" json:"totalCnt"`
+		SuccessCnt int     `db:"success_cnt" json:"successCnt"`
+		SuccessRate float64 `db:"success_rate" json:"successRate"`
+	}
+
+	var stats []HourlyStat
+	err = h.db.Select(&stats, `
+		SELECT
+			to_char(date_trunc('hour', checked_at), 'YYYY-MM-DD HH24:00:00') as hour,
+			COUNT(*) as total_cnt,
+			COUNT(*) FILTER (WHERE is_success = true) as success_cnt,
+			ROUND(
+				COUNT(*) FILTER (WHERE is_success = true)::numeric / NULLIF(COUNT(*), 0)::numeric * 100,
+				2
+			) as success_rate
+		FROM probe_records
+		WHERE probe_id = $1
+		  AND checked_at >= NOW() - INTERVAL '24 hours'
+		GROUP BY date_trunc('hour', checked_at)
+		ORDER BY hour ASC
+	`, probeID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load availability trend"})
+		return
+	}
+
+	type FullHour struct {
+		Hour        string  `json:"hour"`
+		TotalCnt    int     `json:"totalCnt"`
+		SuccessCnt  int     `json:"successCnt"`
+		SuccessRate float64 `json:"successRate"`
+		HasData     bool    `json:"hasData"`
+	}
+
+	fullStats := make([]FullHour, 24)
+	now := time.Now()
+	for i := 23; i >= 0; i-- {
+		hourTime := now.Add(time.Duration(-i) * time.Hour).Truncate(time.Hour)
+		hourStr := hourTime.Format("2006-01-02 15:00:00")
+		fullStats[23-i] = FullHour{
+			Hour:    hourStr,
+			HasData: false,
+		}
+	}
+
+	statMap := make(map[string]HourlyStat)
+	for _, s := range stats {
+		statMap[s.Hour] = s
+	}
+
+	totalAll := 0
+	successAll := 0
+
+	for i := range fullStats {
+		if stat, ok := statMap[fullStats[i].Hour]; ok {
+			fullStats[i].TotalCnt = stat.TotalCnt
+			fullStats[i].SuccessCnt = stat.SuccessCnt
+			fullStats[i].SuccessRate = stat.SuccessRate
+			fullStats[i].HasData = true
+			totalAll += stat.TotalCnt
+			successAll += stat.SuccessCnt
+		}
+	}
+
+	overallRate := 0.0
+	if totalAll > 0 {
+		overallRate = float64(successAll) / float64(totalAll) * 100
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"hours":        fullStats,
+		"overallRate":  overallRate,
+		"totalCount":   totalAll,
+		"successCount": successAll,
+	})
+}
+
 func (h *Handler) GetProbeAlerts(c *gin.Context) {
 	projectID := c.Param("projectId")
 
@@ -490,11 +626,12 @@ func (h *Handler) CreateProbeForAPI(c *gin.Context) {
 	}
 
 	var req struct {
-		Enabled          *bool `json:"enabled"`
-		IntervalSeconds  int   `json:"intervalSeconds"`
-		TimeoutMs        int   `json:"timeoutMs"`
-		FailThreshold    int   `json:"failThreshold"`
-		RecoverThreshold int   `json:"recoverThreshold"`
+		Enabled          *bool   `json:"enabled"`
+		GroupName        string  `json:"groupName"`
+		IntervalSeconds  int     `json:"intervalSeconds"`
+		TimeoutMs        int     `json:"timeoutMs"`
+		FailThreshold    int     `json:"failThreshold"`
+		RecoverThreshold int     `json:"recoverThreshold"`
 	}
 	c.ShouldBindJSON(&req)
 
@@ -539,23 +676,24 @@ func (h *Handler) CreateProbeForAPI(c *gin.Context) {
 	}
 
 	probe := models.ProbeConfig{
-		ID:                  uuid.New().String(),
-		APIID:               apiID,
-		ProjectID:           projectID,
-		Enabled:             enabled,
-		IntervalSeconds:     intervalSeconds,
-		TimeoutMs:           timeoutMs,
-		FailThreshold:       failThreshold,
-		RecoverThreshold:    recoverThreshold,
-		Status:              "healthy",
-		ConsecutiveFailures: 0,
+		ID:                   uuid.New().String(),
+		APIID:                apiID,
+		ProjectID:            projectID,
+		Enabled:              enabled,
+		GroupName:            req.GroupName,
+		IntervalSeconds:      intervalSeconds,
+		TimeoutMs:            timeoutMs,
+		FailThreshold:        failThreshold,
+		RecoverThreshold:     recoverThreshold,
+		Status:               "healthy",
+		ConsecutiveFailures:  0,
 		ConsecutiveSuccesses: 0,
 	}
 
 	_, err = h.db.Exec(
-		`INSERT INTO probe_configs (id, api_id, project_id, enabled, interval_seconds, timeout_ms, fail_threshold, recover_threshold, status, consecutive_failures, consecutive_successes)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-		probe.ID, probe.APIID, probe.ProjectID, probe.Enabled,
+		`INSERT INTO probe_configs (id, api_id, project_id, enabled, group_name, interval_seconds, timeout_ms, fail_threshold, recover_threshold, status, consecutive_failures, consecutive_successes)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		probe.ID, probe.APIID, probe.ProjectID, probe.Enabled, probe.GroupName,
 		probe.IntervalSeconds, probe.TimeoutMs, probe.FailThreshold, probe.RecoverThreshold,
 		probe.Status, probe.ConsecutiveFailures, probe.ConsecutiveSuccesses,
 	)
@@ -588,4 +726,182 @@ func (h *Handler) GetAPIProbe(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"probe": probe})
+}
+
+func (h *Handler) BatchEnableProbes(c *gin.Context) {
+	projectID := c.Param("projectId")
+
+	role, err := h.getProjectRole(c, projectID)
+	if err != nil || role == "viewer" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Editor or admin access required"})
+		return
+	}
+
+	var req struct {
+		ProbeIDs []string `json:"probeIds" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	success := 0
+	skipped := 0
+	failed := 0
+	var skippedIDs []string
+
+	var enabledCount int
+	h.db.Get(&enabledCount,
+		"SELECT COUNT(*) FROM probe_configs WHERE project_id = $1 AND enabled = true",
+		projectID,
+	)
+
+	for _, probeID := range req.ProbeIDs {
+		var probe models.ProbeConfig
+		err := h.db.Get(&probe, "SELECT * FROM probe_configs WHERE id = $1 AND project_id = $2", probeID, projectID)
+		if err != nil {
+			failed++
+			continue
+		}
+
+		if probe.Enabled {
+			skipped++
+			skippedIDs = append(skippedIDs, probeID)
+			continue
+		}
+
+		if enabledCount >= 20 {
+			skipped++
+			skippedIDs = append(skippedIDs, probeID)
+			continue
+		}
+
+		_, err = h.db.Exec("UPDATE probe_configs SET enabled = true, updated_at = NOW() WHERE id = $1", probeID)
+		if err != nil {
+			failed++
+			continue
+		}
+
+		enabledCount++
+		success++
+
+		if h.scheduler != nil {
+			var updated models.ProbeConfig
+			h.db.Get(&updated, "SELECT * FROM probe_configs WHERE id = $1", probeID)
+			h.scheduler.StartProbe(updated)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": success,
+		"skipped": skipped,
+		"failed":  failed,
+		"skippedIds": skippedIDs,
+	})
+}
+
+func (h *Handler) BatchDisableProbes(c *gin.Context) {
+	projectID := c.Param("projectId")
+
+	role, err := h.getProjectRole(c, projectID)
+	if err != nil || role == "viewer" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Editor or admin access required"})
+		return
+	}
+
+	var req struct {
+		ProbeIDs []string `json:"probeIds" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	success := 0
+	skipped := 0
+	failed := 0
+
+	for _, probeID := range req.ProbeIDs {
+		var probe models.ProbeConfig
+		err := h.db.Get(&probe, "SELECT * FROM probe_configs WHERE id = $1 AND project_id = $2", probeID, projectID)
+		if err != nil {
+			failed++
+			continue
+		}
+
+		if !probe.Enabled {
+			skipped++
+			continue
+		}
+
+		_, err = h.db.Exec("UPDATE probe_configs SET enabled = false, updated_at = NOW() WHERE id = $1", probeID)
+		if err != nil {
+			failed++
+			continue
+		}
+
+		success++
+
+		if h.scheduler != nil {
+			h.scheduler.StopProbe(probeID)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": success,
+		"skipped": skipped,
+		"failed":  failed,
+	})
+}
+
+func (h *Handler) BatchDeleteProbes(c *gin.Context) {
+	projectID := c.Param("projectId")
+
+	role, err := h.getProjectRole(c, projectID)
+	if err != nil || role == "viewer" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Editor or admin access required"})
+		return
+	}
+
+	var req struct {
+		ProbeIDs []string `json:"probeIds" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	success := 0
+	failed := 0
+
+	for _, probeID := range req.ProbeIDs {
+		_, err := h.db.Exec("DELETE FROM probe_configs WHERE id = $1 AND project_id = $2", probeID, projectID)
+		if err != nil {
+			failed++
+			continue
+		}
+
+		success++
+
+		if h.scheduler != nil {
+			h.scheduler.RemoveProbe(probeID)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": success,
+		"skipped": 0,
+		"failed":  failed,
+	})
+}
+
+func (h *Handler) ProbeWebSocket(c *gin.Context) {
+	projectID := c.Param("projectId")
+
+	if !h.canAccessProject(c, projectID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "No access to project"})
+		return
+	}
+
+	ws.ServeWS(h.wsHub, projectID, c)
 }

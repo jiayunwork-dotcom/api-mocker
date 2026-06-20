@@ -17,6 +17,7 @@
           <el-button @click="$router.push(`/project/${projectId}/models`)">公共模型</el-button>
           <el-button @click="$router.push(`/project/${projectId}/codegen`)">代码生成</el-button>
           <el-button @click="$router.push(`/project/${projectId}/export`)">导出</el-button>
+          <el-button @click="showImportDialog = true">导入</el-button>
           <el-button type="primary" @click="createApi">新建接口</el-button>
         </div>
       </div>
@@ -59,6 +60,100 @@
         </el-timeline-item>
       </el-timeline>
     </div>
+
+    <el-dialog
+      v-model="showImportDialog"
+      title="批量导入接口"
+      width="700px"
+      :close-on-click-modal="false"
+    >
+      <el-tabs v-model="importTab" type="border-card">
+        <el-tab-pane label="粘贴JSON" name="paste">
+          <div class="paste-area">
+            <el-input
+              v-model="pasteContent"
+              type="textarea"
+              :rows="16"
+              placeholder="请粘贴 OpenAPI 3.0 格式的 JSON 内容..."
+              resize="none"
+            />
+            <div class="hint">
+              <el-icon><InfoFilled /></el-icon>
+              <span>支持 OpenAPI 3.0.x 格式，系统将自动解析 paths 对象中的所有接口定义</span>
+            </div>
+          </div>
+        </el-tab-pane>
+        <el-tab-pane label="上传文件" name="upload">
+          <div class="upload-area">
+            <el-upload
+              ref="uploadRef"
+              class="upload-dragger"
+              drag
+              :auto-upload="false"
+              :on-change="handleFileChange"
+              :on-exceed="handleFileExceed"
+              :limit="1"
+              accept=".json"
+              :file-list="fileList"
+            >
+              <el-icon class="upload-icon"><UploadFilled /></el-icon>
+              <div class="upload-text">将文件拖到此处，或<em>点击选择文件</em></div>
+              <div class="upload-hint">仅支持 .json 格式文件，文件大小不超过 2MB</div>
+            </el-upload>
+            <div v-if="selectedFileName" class="selected-file">
+              <el-icon><Document /></el-icon>
+              <span>{{ selectedFileName }}</span>
+              <el-button link type="danger" @click="clearFile">移除</el-button>
+            </div>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
+
+      <div v-if="importError" class="error-alert">
+        <el-alert :title="importError" type="error" :closable="false" show-icon />
+      </div>
+
+      <div v-if="importResult" class="import-result">
+        <el-alert type="success" :closable="false" show-icon>
+          <template #title>
+            <div class="result-summary">
+              <span>导入完成：</span>
+              <el-tag type="success">成功 {{ importResult.success }} 条</el-tag>
+              <el-tag type="warning" v-if="importResult.skipped > 0">跳过 {{ importResult.skipped }} 条</el-tag>
+              <el-tag type="danger" v-if="importResult.failed > 0">失败 {{ importResult.failed }} 条</el-tag>
+            </div>
+          </template>
+        </el-alert>
+        <el-table :data="importResult.items" style="margin-top: 16px" size="small" max-height="300">
+          <el-table-column prop="method" label="方法" width="80">
+            <template #default="{ row }">
+              <el-tag :type="getMethodTagType(row.method)" size="small">{{ row.method }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="path" label="路径" min-width="200" />
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag v-if="row.status === 'success'" type="success" size="small">成功</el-tag>
+              <el-tag v-else-if="row.status === 'skipped'" type="warning" size="small">跳过</el-tag>
+              <el-tag v-else type="danger" size="small">失败</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="error" label="备注" min-width="150">
+            <template #default="{ row }">
+              <span v-if="row.error" class="error-text">{{ row.error }}</span>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+
+      <template #footer>
+        <el-button @click="closeImportDialog">关闭</el-button>
+        <el-button type="primary" :loading="importing" @click="doImport">
+          {{ importResult ? '重新导入' : '确认导入' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -66,6 +161,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { InfoFilled, UploadFilled, Document } from '@element-plus/icons-vue'
 import { apiDefAPI, activityAPI } from '../api'
 
 const route = useRoute()
@@ -76,6 +172,19 @@ const project = ref(null)
 const apis = ref([])
 const activities = ref([])
 const mockBaseUrl = window.location.origin
+
+const showImportDialog = ref(false)
+const importTab = ref('paste')
+const pasteContent = ref('')
+const importing = ref(false)
+const importError = ref('')
+const importResult = ref(null)
+const uploadRef = ref(null)
+const fileList = ref([])
+const selectedFile = ref(null)
+const selectedFileName = ref('')
+
+const MAX_FILE_SIZE = 2 * 1024 * 1024
 
 async function loadProject() {
   project.value = { id: projectId, name: '加载中...', description: '' }
@@ -119,6 +228,101 @@ function copyMockUrl() {
 
 function formatTime(t) {
   return new Date(t).toLocaleString('zh-CN')
+}
+
+function closeImportDialog() {
+  showImportDialog.value = false
+  pasteContent.value = ''
+  importError.value = ''
+  importResult.value = null
+  clearFile()
+}
+
+function handleFileChange(uploadFile) {
+  if (uploadFile.raw.size > MAX_FILE_SIZE) {
+    ElMessage.error('文件大小不能超过 2MB')
+    clearFile()
+    return
+  }
+  if (!uploadFile.name.endsWith('.json')) {
+    ElMessage.error('仅支持 .json 格式文件')
+    clearFile()
+    return
+  }
+  selectedFile.value = uploadFile.raw
+  selectedFileName.value = uploadFile.name
+  fileList.value = [uploadFile]
+}
+
+function handleFileExceed() {
+  ElMessage.warning('只能上传一个文件')
+}
+
+function clearFile() {
+  selectedFile.value = null
+  selectedFileName.value = ''
+  fileList.value = []
+  if (uploadRef.value) {
+    uploadRef.value.clearFiles()
+  }
+}
+
+function getMethodTagType(method) {
+  const map = {
+    GET: 'success',
+    POST: 'primary',
+    PUT: 'warning',
+    PATCH: '',
+    DELETE: 'danger',
+    HEAD: 'info',
+    OPTIONS: 'info'
+  }
+  return map[method] || ''
+}
+
+async function doImport() {
+  importError.value = ''
+  importResult.value = null
+  importing.value = true
+
+  try {
+    let res
+    if (importTab.value === 'paste') {
+      if (!pasteContent.value.trim()) {
+        importError.value = '请输入 OpenAPI JSON 内容'
+        importing.value = false
+        return
+      }
+      res = await apiDefAPI.import(projectId, { content: pasteContent.value })
+    } else {
+      if (!selectedFile.value) {
+        importError.value = '请选择要上传的文件'
+        importing.value = false
+        return
+      }
+      res = await apiDefAPI.importFile(projectId, selectedFile.value)
+    }
+
+    importResult.value = res.result
+
+    if (res.result.success > 0) {
+      ElMessage.success(`成功导入 ${res.result.success} 条接口`)
+      loadApis()
+      loadActivities()
+    } else if (res.result.skipped > 0 && res.result.failed === 0) {
+      ElMessage.warning(`所有接口均已存在，共跳过 ${res.result.skipped} 条`)
+    } else if (res.result.failed > 0) {
+      ElMessage.error(`导入失败 ${res.result.failed} 条，请查看详情`)
+    }
+  } catch (err) {
+    if (err.response && err.response.data && err.response.data.error) {
+      importError.value = err.response.data.error
+    } else {
+      importError.value = '导入失败，请检查网络连接或稍后重试'
+    }
+  } finally {
+    importing.value = false
+  }
 }
 
 onMounted(() => { loadProject(); loadApis(); loadActivities() })
@@ -217,5 +421,81 @@ onMounted(() => { loadProject(); loadApis(); loadActivities() })
 .breaking-change {
   color: #f56c6c;
   font-weight: 500;
+}
+
+.paste-area {
+  padding: 16px 0;
+}
+
+.paste-area .hint {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #909399;
+  font-size: 13px;
+}
+
+.upload-area {
+  padding: 16px 0;
+}
+
+.upload-icon {
+  font-size: 67px;
+  color: #409eff;
+}
+
+.upload-text {
+  font-size: 14px;
+  color: #606266;
+  margin: 8px 0;
+}
+
+.upload-text em {
+  color: #409eff;
+  font-style: normal;
+}
+
+.upload-hint {
+  font-size: 12px;
+  color: #909399;
+}
+
+.selected-file {
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: #f5f7fa;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.selected-file span {
+  flex: 1;
+  color: #606266;
+}
+
+.error-alert {
+  margin-top: 16px;
+}
+
+.import-result {
+  margin-top: 16px;
+}
+
+.result-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.result-summary .el-tag {
+  margin-left: 4px;
+}
+
+.error-text {
+  color: #f56c6c;
+  font-size: 12px;
 }
 </style>

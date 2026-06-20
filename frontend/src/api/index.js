@@ -67,6 +67,14 @@ export const projectAPI = {
 export const apiDefAPI = {
   list: (projectId) => api.get(`/projects/${projectId}/apis`),
   create: (projectId, data) => api.post(`/projects/${projectId}/apis`, data),
+  import: (projectId, data) => api.post(`/projects/${projectId}/apis/import`, data),
+  importFile: (projectId, file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post(`/projects/${projectId}/apis/import`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  },
   get: (projectId, id) => api.get(`/projects/${projectId}/apis/${id}`),
   update: (projectId, id, data) => api.put(`/projects/${projectId}/apis/${id}`, data),
   delete: (projectId, id) => api.delete(`/projects/${projectId}/apis/${id}`)

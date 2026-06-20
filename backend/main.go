@@ -79,6 +79,7 @@ func main() {
 			{
 				apis.GET("", h.ListAPIs)
 				apis.POST("", h.CreateAPI)
+				apis.POST("/import", h.ImportOpenAPI)
 				apis.GET("/:id", h.GetAPI)
 				apis.PUT("/:id", h.UpdateAPI)
 				apis.DELETE("/:id", h.DeleteAPI)

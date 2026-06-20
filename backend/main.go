@@ -13,6 +13,7 @@ import (
 	"api-mocker/database"
 	"api-mocker/handlers"
 	"api-mocker/middleware"
+	"api-mocker/probe"
 )
 
 func requestSizeLimitMiddleware(maxSize int64) gin.HandlerFunc {
@@ -37,6 +38,10 @@ func main() {
 
 	rdb := cache.Connect(cfg)
 
+	scheduler := probe.NewScheduler(db, cfg.MockBaseURL)
+	scheduler.Start()
+	defer scheduler.Stop()
+
 	r := gin.Default()
 
 	r.Use(cors.New(cors.Config{
@@ -53,7 +58,7 @@ func main() {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
-	h := handlers.New(db, rdb, cfg)
+	h := handlers.New(db, rdb, cfg, scheduler)
 
 	api := r.Group("/api")
 	{
@@ -123,6 +128,20 @@ func main() {
 			}
 
 			auth.GET("/projects/:projectId/activities", h.ListActivities)
+
+			probes := auth.Group("/projects/:projectId/probes")
+			{
+				probes.GET("", h.ListProbes)
+				probes.POST("", h.CreateProbe)
+				probes.GET("/dashboard", h.GetProbeDashboard)
+				probes.GET("/alerts", h.GetProbeAlerts)
+				probes.GET("/:probeId", h.GetProbeDetail)
+				probes.PUT("/:probeId", h.UpdateProbe)
+				probes.DELETE("/:probeId", h.DeleteProbe)
+			}
+
+			apis.GET("/:id/probe", h.GetAPIProbe)
+			apis.POST("/:id/probe", h.CreateProbeForAPI)
 		}
 
 		api.POST("/register", h.Register)

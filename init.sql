@@ -112,3 +112,48 @@ CREATE INDEX idx_api_versions_created ON api_versions(api_id, created_at DESC);
 CREATE INDEX idx_shared_models_project ON shared_models(project_id);
 CREATE INDEX idx_invitations_token ON invitations(token);
 CREATE INDEX idx_invitations_workspace ON invitations(workspace_id);
+
+CREATE TABLE probe_configs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    api_id UUID NOT NULL REFERENCES apis(id) ON DELETE CASCADE,
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    interval_seconds INT NOT NULL DEFAULT 30 CHECK (interval_seconds >= 10 AND interval_seconds <= 300),
+    timeout_ms INT NOT NULL DEFAULT 3000 CHECK (timeout_ms > 0),
+    fail_threshold INT NOT NULL DEFAULT 3 CHECK (fail_threshold > 0),
+    recover_threshold INT NOT NULL DEFAULT 2 CHECK (recover_threshold > 0),
+    status VARCHAR(20) NOT NULL DEFAULT 'healthy' CHECK (status IN ('healthy', 'degraded', 'unhealthy')),
+    consecutive_failures INT NOT NULL DEFAULT 0,
+    consecutive_successes INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(api_id)
+);
+
+CREATE TABLE probe_records (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    probe_id UUID NOT NULL REFERENCES probe_configs(id) ON DELETE CASCADE,
+    status_code INT NOT NULL DEFAULT 0,
+    response_time_ms INT NOT NULL DEFAULT 0,
+    response_size INT NOT NULL DEFAULT 0,
+    is_success BOOLEAN NOT NULL DEFAULT FALSE,
+    checked_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE alert_events (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    probe_id UUID NOT NULL REFERENCES probe_configs(id) ON DELETE CASCADE,
+    probe_name VARCHAR(200) NOT NULL,
+    old_status VARCHAR(20) NOT NULL,
+    new_status VARCHAR(20) NOT NULL,
+    last_response_time_ms INT NOT NULL DEFAULT 0,
+    last_status_code INT NOT NULL DEFAULT 0,
+    triggered_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_probe_configs_project ON probe_configs(project_id);
+CREATE INDEX idx_probe_configs_enabled ON probe_configs(project_id, enabled);
+CREATE INDEX idx_probe_records_probe ON probe_records(probe_id);
+CREATE INDEX idx_probe_records_checked ON probe_records(probe_id, checked_at DESC);
+CREATE INDEX idx_alert_events_probe ON alert_events(probe_id);
+CREATE INDEX idx_alert_events_triggered ON alert_events(probe_id, triggered_at DESC);

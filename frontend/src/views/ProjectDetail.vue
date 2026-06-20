@@ -28,37 +28,45 @@
         <el-button size="small" text @click="copyMockUrl">复制</el-button>
       </div>
 
-      <div class="api-list">
-        <div v-for="api in apis" :key="api.id" class="api-item card" @click="editApi(api)">
-          <div class="api-left">
-            <span :class="['method-badge', `method-${api.method.toLowerCase()}`]">{{ api.method }}</span>
-            <span class="api-path">{{ api.path }}</span>
-            <span class="api-desc">{{ api.description }}</span>
+      <el-tabs v-model="activeTab" class="project-tabs">
+        <el-tab-pane label="接口列表" name="apis">
+          <div class="api-list">
+            <div v-for="api in apis" :key="api.id" class="api-item card" @click="editApi(api)">
+              <div class="api-left">
+                <span :class="['method-badge', `method-${api.method.toLowerCase()}`]">{{ api.method }}</span>
+                <span class="api-path">{{ api.path }}</span>
+                <span class="api-desc">{{ api.description }}</span>
+              </div>
+              <div class="api-right">
+                <el-tag v-for="tag in api.tags" :key="tag" size="small" style="margin-left:4px">{{ tag }}</el-tag>
+                <el-button size="small" type="danger" text @click.stop="deleteApi(api)">删除</el-button>
+              </div>
+            </div>
+            <el-empty v-if="!apis.length" description="暂无接口，点击右上角创建" />
           </div>
-          <div class="api-right">
-            <el-tag v-for="tag in api.tags" :key="tag" size="small" style="margin-left:4px">{{ tag }}</el-tag>
-            <el-button size="small" type="danger" text @click.stop="deleteApi(api)">删除</el-button>
-          </div>
-        </div>
-        <el-empty v-if="!apis.length" description="暂无接口，点击右上角创建" />
-      </div>
 
-      <div class="section-title">项目动态</div>
-      <el-timeline>
-        <el-timeline-item
-          v-for="act in activities"
-          :key="act.id"
-          :timestamp="formatTime(act.created_at)"
-          placement="top"
-          :type="act.is_breaking ? 'danger' : 'primary'"
-        >
-          <div :class="{ 'breaking-change': act.is_breaking }">
-            <strong>{{ act.changer_name }}</strong>
-            {{ act.change_summary }}
-            <el-tag v-if="act.is_breaking" type="danger" size="small" style="margin-left:8px">Breaking Change</el-tag>
-          </div>
-        </el-timeline-item>
-      </el-timeline>
+          <div class="section-title">项目动态</div>
+          <el-timeline>
+            <el-timeline-item
+              v-for="act in activities"
+              :key="act.id"
+              :timestamp="formatTime(act.created_at)"
+              placement="top"
+              :type="act.is_breaking ? 'danger' : 'primary'"
+            >
+              <div :class="{ 'breaking-change': act.is_breaking }">
+                <strong>{{ act.changer_name }}</strong>
+                {{ act.change_summary }}
+                <el-tag v-if="act.is_breaking" type="danger" size="small" style="margin-left:8px">Breaking Change</el-tag>
+              </div>
+            </el-timeline-item>
+          </el-timeline>
+        </el-tab-pane>
+
+        <el-tab-pane label="健康监控" name="health">
+          <HealthMonitor :projectId="projectId" />
+        </el-tab-pane>
+      </el-tabs>
     </div>
 
     <el-dialog
@@ -163,6 +171,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { InfoFilled, UploadFilled, Document } from '@element-plus/icons-vue'
 import { apiDefAPI, activityAPI } from '../api'
+import HealthMonitor from '../components/HealthMonitor.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -172,6 +181,7 @@ const project = ref(null)
 const apis = ref([])
 const activities = ref([])
 const mockBaseUrl = window.location.origin
+const activeTab = ref('apis')
 
 const showImportDialog = ref(false)
 const importTab = ref('paste')
@@ -374,6 +384,14 @@ onMounted(() => { loadProject(); loadApis(); loadActivities() })
 
 .api-list {
   margin-top: 16px;
+}
+
+.project-tabs {
+  margin-top: 16px;
+}
+
+.project-tabs :deep(.el-tabs__header) {
+  margin-bottom: 16px;
 }
 
 .api-item {

@@ -187,3 +187,40 @@ type ConditionRule struct {
 	Operator string `json:"operator"`
 	Value    string `json:"value"`
 }
+
+type ProbeConfig struct {
+	ID                  string    `db:"id" json:"id"`
+	APIID               string    `db:"api_id" json:"api_id"`
+	ProjectID           string    `db:"project_id" json:"project_id"`
+	Enabled             bool      `db:"enabled" json:"enabled"`
+	IntervalSeconds     int       `db:"interval_seconds" json:"interval_seconds"`
+	TimeoutMs           int       `db:"timeout_ms" json:"timeout_ms"`
+	FailThreshold       int       `db:"fail_threshold" json:"fail_threshold"`
+	RecoverThreshold    int       `db:"recover_threshold" json:"recover_threshold"`
+	Status              string    `db:"status" json:"status"`
+	ConsecutiveFailures int       `db:"consecutive_failures" json:"consecutive_failures"`
+	ConsecutiveSuccesses int      `db:"consecutive_successes" json:"consecutive_successes"`
+	CreatedAt           time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt           time.Time `db:"updated_at" json:"updated_at"`
+}
+
+type ProbeRecord struct {
+	ID             string    `db:"id" json:"id"`
+	ProbeID        string    `db:"probe_id" json:"probe_id"`
+	StatusCode     int       `db:"status_code" json:"status_code"`
+	ResponseTimeMs int       `db:"response_time_ms" json:"response_time_ms"`
+	ResponseSize   int       `db:"response_size" json:"response_size"`
+	IsSuccess      bool      `db:"is_success" json:"is_success"`
+	CheckedAt      time.Time `db:"checked_at" json:"checked_at"`
+}
+
+type AlertEvent struct {
+	ID                  string    `db:"id" json:"id"`
+	ProbeID             string    `db:"probe_id" json:"probe_id"`
+	ProbeName           string    `db:"probe_name" json:"probe_name"`
+	OldStatus           string    `db:"old_status" json:"old_status"`
+	NewStatus           string    `db:"new_status" json:"new_status"`
+	LastResponseTimeMs  int       `db:"last_response_time_ms" json:"last_response_time_ms"`
+	LastStatusCode      int       `db:"last_status_code" json:"last_status_code"`
+	TriggeredAt         time.Time `db:"triggered_at" json:"triggered_at"`
+}

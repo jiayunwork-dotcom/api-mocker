@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/golang-jwt/jwt/v5"
 
 	"api-mocker/models"
 	ws "api-mocker/websocket"
@@ -897,6 +899,41 @@ func (h *Handler) BatchDeleteProbes(c *gin.Context) {
 
 func (h *Handler) ProbeWebSocket(c *gin.Context) {
 	projectID := c.Param("projectId")
+
+	tokenStr := ""
+	authHeader := c.GetHeader("Authorization")
+	if authHeader != "" {
+		tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
+	}
+	if tokenStr == "" {
+		tokenStr = c.Query("token")
+	}
+
+	if tokenStr == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token required"})
+		return
+	}
+
+	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return []byte(h.cfg.JWTSecret), nil
+	})
+
+	if err != nil || !token.Valid {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		return
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+		return
+	}
+
+	userID, _ := claims["sub"].(string)
+	c.Set("userID", userID)
 
 	if !h.canAccessProject(c, projectID) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "No access to project"})

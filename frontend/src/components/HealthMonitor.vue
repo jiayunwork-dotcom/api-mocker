@@ -683,7 +683,10 @@ function connectWebSocket() {
 
   const token = localStorage.getItem('token')
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const wsUrl = `${protocol}//${window.location.host}/api/projects/${props.projectId}/probes/ws`
+  let wsUrl = `${protocol}//${window.location.host}/api/projects/${props.projectId}/probes/ws`
+  if (token) {
+    wsUrl += `?token=${encodeURIComponent(token)}`
+  }
 
   try {
     ws = new WebSocket(wsUrl)

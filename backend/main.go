@@ -134,7 +134,6 @@ func main() {
 
 			probes := auth.Group("/projects/:projectId/probes")
 			{
-				probes.GET("/ws", h.ProbeWebSocket)
 				probes.GET("", h.ListProbes)
 				probes.POST("", h.CreateProbe)
 				probes.POST("/batch/enable", h.BatchEnableProbes)
@@ -147,6 +146,8 @@ func main() {
 				probes.PUT("/:probeId", h.UpdateProbe)
 				probes.DELETE("/:probeId", h.DeleteProbe)
 			}
+
+			api.GET("/projects/:projectId/probes/ws", h.ProbeWebSocket)
 
 			apis.GET("/:id/probe", h.GetAPIProbe)
 			apis.POST("/:id/probe", h.CreateProbeForAPI)

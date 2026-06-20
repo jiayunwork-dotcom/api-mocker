@@ -282,25 +282,26 @@ func (s *Scheduler) updateStateMachine(cfg models.ProbeConfig, isSuccess bool, s
 	if isSuccess {
 		newConsecFail = 0
 		newConsecSuccess = cfg.ConsecutiveSuccesses + 1
-		if oldStatus == "unhealthy" && newConsecSuccess >= cfg.RecoverThreshold {
+		if oldStatus == "unhealthy" {
+			if newConsecSuccess >= cfg.RecoverThreshold {
+				newStatus = "healthy"
+			} else {
+				newStatus = oldStatus
+			}
+		} else if oldStatus == "degraded" {
 			newStatus = "healthy"
+			newConsecSuccess = 1
 		} else {
-			newStatus = oldStatus
+			newStatus = "healthy"
 		}
 	} else {
 		newConsecSuccess = 0
 		newConsecFail = cfg.ConsecutiveFailures + 1
 		if newConsecFail >= cfg.FailThreshold {
 			newStatus = "unhealthy"
-		} else if newConsecFail == 1 {
-			newStatus = "degraded"
 		} else {
-			newStatus = oldStatus
+			newStatus = "degraded"
 		}
-	}
-
-	if newStatus == "" {
-		newStatus = oldStatus
 	}
 
 	_, err := s.db.Exec(
@@ -312,16 +313,16 @@ func (s *Scheduler) updateStateMachine(cfg models.ProbeConfig, isSuccess bool, s
 		return
 	}
 
+	s.mu.Lock()
+	if w, exists := s.probes[cfg.ID]; exists && w.running {
+		w.config.Status = newStatus
+		w.config.ConsecutiveFailures = newConsecFail
+		w.config.ConsecutiveSuccesses = newConsecSuccess
+	}
+	s.mu.Unlock()
+
 	if newStatus != oldStatus {
 		s.createAlertEvent(cfg, oldStatus, newStatus, statusCode, responseTimeMs)
-
-		s.mu.RLock()
-		if w, exists := s.probes[cfg.ID]; exists && w.running {
-			w.config.Status = newStatus
-			w.config.ConsecutiveFailures = newConsecFail
-			w.config.ConsecutiveSuccesses = newConsecSuccess
-		}
-		s.mu.RUnlock()
 	}
 }
 

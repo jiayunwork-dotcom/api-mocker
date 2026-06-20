@@ -85,12 +85,12 @@ func (h *Handler) CreateAPI(c *gin.Context) {
 		return
 	}
 
-	paramsJSON := defaultJSON(req.Params, []byte("[]"))
-	bodyJSON := defaultJSON(req.RequestBody, []byte("{}"))
-	responsesJSON := defaultJSON(req.Responses, []byte("{}"))
-	tags := req.Tags
+	paramsJSON := models.JSONB(defaultJSON(req.Params, []byte("[]")))
+	bodyJSON := models.JSONB(defaultJSON(req.RequestBody, []byte("{}")))
+	responsesJSON := models.JSONB(defaultJSON(req.Responses, []byte("{}")))
+	tags := models.StringArray(req.Tags)
 	if tags == nil {
-		tags = []string{}
+		tags = models.StringArray{}
 	}
 
 	api := models.API{
@@ -203,10 +203,10 @@ func (h *Handler) UpdateAPI(c *gin.Context) {
 		}
 	}
 
-	paramsJSON := defaultJSON(req.Params, oldAPI.Params.(json.RawMessage))
-	bodyJSON := defaultJSON(req.RequestBody, oldAPI.RequestBody.(json.RawMessage))
-	responsesJSON := defaultJSON(req.Responses, oldAPI.Responses.(json.RawMessage))
-	tags := req.Tags
+	paramsJSON := models.JSONB(defaultJSON(req.Params, []byte(oldAPI.Params)))
+	bodyJSON := models.JSONB(defaultJSON(req.RequestBody, []byte(oldAPI.RequestBody)))
+	responsesJSON := models.JSONB(defaultJSON(req.Responses, []byte(oldAPI.Responses)))
+	tags := models.StringArray(req.Tags)
 	if tags == nil {
 		tags = oldAPI.Tags
 	}
@@ -307,8 +307,8 @@ func (h *Handler) CreateScenario(c *gin.Context) {
 		Name:        req.Name,
 		Description: req.Description,
 		Priority:    req.Priority,
-		Conditions:  defaultJSON(req.Conditions, []byte("[]")),
-		Response:    defaultJSON(req.Response, []byte("{}")),
+		Conditions:  models.JSONB(defaultJSON(req.Conditions, []byte("[]"))),
+		Response:    models.JSONB(defaultJSON(req.Response, []byte("{}"))),
 		StatusCode:  defaultInt(req.StatusCode, 200),
 		DelayMs:     req.DelayMs,
 	}
@@ -365,8 +365,8 @@ func (h *Handler) UpdateScenario(c *gin.Context) {
 		`UPDATE mock_scenarios SET name = $1, description = $2, priority = $3, conditions = $4,
 		 response = $5, status_code = $6, delay_ms = $7, updated_at = NOW() WHERE id = $8`,
 		name, req.Description, req.Priority,
-		defaultJSON(req.Conditions, old.Conditions.(json.RawMessage)),
-		defaultJSON(req.Response, old.Response.(json.RawMessage)),
+		models.JSONB(defaultJSON(req.Conditions, []byte(old.Conditions))),
+		models.JSONB(defaultJSON(req.Response, []byte(old.Response))),
 		statusCode, req.DelayMs, scenarioID,
 	)
 	if err != nil {

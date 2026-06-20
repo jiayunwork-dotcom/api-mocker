@@ -61,7 +61,7 @@ func (h *Handler) CreateModel(c *gin.Context) {
 		ProjectID:        projectID,
 		Name:             req.Name,
 		Description:      req.Description,
-		SchemaDefinition: req.SchemaDefinition,
+		SchemaDefinition: models.JSONB(req.SchemaDefinition),
 	}
 
 	_, err = h.db.Exec(
@@ -124,7 +124,7 @@ func (h *Handler) UpdateModel(c *gin.Context) {
 	}
 	schema := req.SchemaDefinition
 	if len(schema) == 0 {
-		schema = old.SchemaDefinition.(json.RawMessage)
+		schema = json.RawMessage(old.SchemaDefinition)
 	}
 
 	if err := h.checkCircularRef(projectID, name, schema); err != nil {
@@ -182,7 +182,7 @@ func (h *Handler) checkCircularRef(projectID, modelName string, schema json.RawM
 	modelMap := map[string][]models.BodyField{}
 	for _, m := range allModels {
 		var f []models.BodyField
-		json.Unmarshal(m.SchemaDefinition.(json.RawMessage), &f)
+		json.Unmarshal([]byte(m.SchemaDefinition), &f)
 		modelMap[m.Name] = f
 	}
 

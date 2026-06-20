@@ -11,7 +11,7 @@
     <div class="page-container">
       <div class="page-header">
         <h2>我的工作空间</h2>
-        <el-button type="primary" @click="showCreateDialog = true">新建工作空间</el-button>
+        <el-button type="primary" @click="openCreateDialog">新建工作空间</el-button>
       </div>
 
       <div class="workspace-grid">
@@ -27,7 +27,7 @@
       <el-empty v-if="!workspaces.length" description="暂无工作空间，点击右上角创建" />
     </div>
 
-    <el-dialog v-model="showCreateDialog" title="新建工作空间" width="480px">
+    <el-dialog v-model="showCreateDialog" title="新建工作空间" width="480px" :modal-append-to-body="true" :append-to-body="true">
       <el-form :model="createForm" label-position="top">
         <el-form-item label="名称">
           <el-input v-model="createForm.name" placeholder="工作空间名称" />
@@ -37,7 +37,7 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showCreateDialog = false">取消</el-button>
+        <el-button @click="closeCreateDialog">取消</el-button>
         <el-button type="primary" @click="createWorkspace" :loading="creating">创建</el-button>
       </template>
     </el-dialog>
@@ -58,6 +58,14 @@ const showCreateDialog = ref(false)
 const creating = ref(false)
 const createForm = ref({ name: '', description: '' })
 
+function openCreateDialog() {
+  showCreateDialog.value = true
+}
+
+function closeCreateDialog() {
+  showCreateDialog.value = false
+}
+
 async function loadWorkspaces() {
   try {
     const res = await workspaceAPI.list()
@@ -74,7 +82,7 @@ async function createWorkspace() {
   try {
     await workspaceAPI.create(createForm.value)
     ElMessage.success('创建成功')
-    showCreateDialog.value = false
+    closeCreateDialog()
     createForm.value = { name: '', description: '' }
     loadWorkspaces()
   } finally {

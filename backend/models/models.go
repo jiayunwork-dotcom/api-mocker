@@ -1,6 +1,59 @@
 package models
 
-import "time"
+import (
+	"database/sql/driver"
+	"encoding/json"
+	"errors"
+	"time"
+
+	"github.com/lib/pq"
+)
+
+type JSONB json.RawMessage
+
+func (j JSONB) Value() (driver.Value, error) {
+	if len(j) == 0 {
+		return []byte("{}"), nil
+	}
+	return []byte(j), nil
+}
+
+func (j *JSONB) Scan(value interface{}) error {
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New("failed to unmarshal JSONB value")
+	}
+	result := JSONB(bytes)
+	*j = result
+	return nil
+}
+
+func (j JSONB) MarshalJSON() ([]byte, error) {
+	if len(j) == 0 {
+		return []byte("{}"), nil
+	}
+	return []byte(j), nil
+}
+
+func (j *JSONB) UnmarshalJSON(data []byte) error {
+	*j = JSONB(data)
+	return nil
+}
+
+type StringArray pq.StringArray
+
+func (s StringArray) Value() (driver.Value, error) {
+	return pq.StringArray(s).Value()
+}
+
+func (s *StringArray) Scan(src interface{}) error {
+	var arr pq.StringArray
+	if err := arr.Scan(src); err != nil {
+		return err
+	}
+	*s = StringArray(arr)
+	return nil
+}
 
 type User struct {
 	ID           string    `db:"id" json:"id"`
@@ -46,23 +99,23 @@ type SharedModel struct {
 	ProjectID        string    `db:"project_id" json:"project_id"`
 	Name             string    `db:"name" json:"name"`
 	Description      string    `db:"description" json:"description,omitempty"`
-	SchemaDefinition any       `db:"schema_definition" json:"schema_definition"`
+	SchemaDefinition JSONB     `db:"schema_definition" json:"schema_definition"`
 	CreatedAt        time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt        time.Time `db:"updated_at" json:"updated_at"`
 }
 
 type API struct {
-	ID          string    `db:"id" json:"id"`
-	ProjectID   string    `db:"project_id" json:"project_id"`
-	Path        string    `db:"path" json:"path"`
-	Method      string    `db:"method" json:"method"`
-	Description string    `db:"description" json:"description,omitempty"`
-	Params      any       `db:"params" json:"params"`
-	RequestBody any       `db:"request_body" json:"request_body"`
-	Responses   any       `db:"responses" json:"responses"`
-	Tags        []string  `db:"tags" json:"tags"`
-	CreatedAt   time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
+	ID          string       `db:"id" json:"id"`
+	ProjectID   string       `db:"project_id" json:"project_id"`
+	Path        string       `db:"path" json:"path"`
+	Method      string       `db:"method" json:"method"`
+	Description string       `db:"description" json:"description,omitempty"`
+	Params      JSONB        `db:"params" json:"params"`
+	RequestBody JSONB        `db:"request_body" json:"request_body"`
+	Responses   JSONB        `db:"responses" json:"responses"`
+	Tags        StringArray  `db:"tags" json:"tags"`
+	CreatedAt   time.Time    `db:"created_at" json:"created_at"`
+	UpdatedAt   time.Time    `db:"updated_at" json:"updated_at"`
 }
 
 type MockScenario struct {
@@ -71,8 +124,8 @@ type MockScenario struct {
 	Name        string    `db:"name" json:"name"`
 	Description string    `db:"description" json:"description,omitempty"`
 	Priority    int       `db:"priority" json:"priority"`
-	Conditions  any       `db:"conditions" json:"conditions"`
-	Response    any       `db:"response" json:"response"`
+	Conditions  JSONB     `db:"conditions" json:"conditions"`
+	Response    JSONB     `db:"response" json:"response"`
 	StatusCode  int       `db:"status_code" json:"status_code"`
 	DelayMs     int       `db:"delay_ms" json:"delay_ms"`
 	CreatedAt   time.Time `db:"created_at" json:"created_at"`
@@ -83,7 +136,7 @@ type APIVersion struct {
 	ID            string    `db:"id" json:"id"`
 	APIID         string    `db:"api_id" json:"api_id"`
 	Version       int       `db:"version" json:"version"`
-	Snapshot      any       `db:"snapshot" json:"snapshot"`
+	Snapshot      JSONB     `db:"snapshot" json:"snapshot"`
 	ChangeSummary string    `db:"change_summary" json:"change_summary,omitempty"`
 	IsBreaking    bool      `db:"is_breaking" json:"is_breaking"`
 	ChangedBy     string    `db:"changed_by" json:"changed_by"`

@@ -21,13 +21,13 @@ type DiffResult struct {
 
 func (h *Handler) createVersion(apiID, userID string, oldAPI *models.API, newAPI models.API) {
 	snapshot := map[string]interface{}{
-		"path":         newAPI.Path,
-		"method":       newAPI.Method,
-		"description":  newAPI.Description,
-		"params":       newAPI.Params,
-		"requestBody":  newAPI.RequestBody,
-		"responses":    newAPI.Responses,
-		"tags":         newAPI.Tags,
+		"path":        newAPI.Path,
+		"method":      newAPI.Method,
+		"description": newAPI.Description,
+		"params":      json.RawMessage(newAPI.Params),
+		"requestBody": json.RawMessage(newAPI.RequestBody),
+		"responses":   json.RawMessage(newAPI.Responses),
+		"tags":        []string(newAPI.Tags),
 	}
 
 	snapshotJSON, _ := json.Marshal(snapshot)
@@ -38,10 +38,10 @@ func (h *Handler) createVersion(apiID, userID string, oldAPI *models.API, newAPI
 			"path":        oldAPI.Path,
 			"method":      oldAPI.Method,
 			"description": oldAPI.Description,
-			"params":      oldAPI.Params,
-			"requestBody": oldAPI.RequestBody,
-			"responses":   oldAPI.Responses,
-			"tags":        oldAPI.Tags,
+			"params":      json.RawMessage(oldAPI.Params),
+			"requestBody": json.RawMessage(oldAPI.RequestBody),
+			"responses":   json.RawMessage(oldAPI.Responses),
+			"tags":        []string(oldAPI.Tags),
 		}
 	}
 
@@ -155,8 +155,8 @@ func (h *Handler) DiffVersions(c *gin.Context) {
 	}
 
 	var oldSnap, newSnap map[string]interface{}
-	json.Unmarshal(prevVersion.Snapshot.(json.RawMessage), &oldSnap)
-	json.Unmarshal(targetVersion.Snapshot.(json.RawMessage), &newSnap)
+	json.Unmarshal([]byte(prevVersion.Snapshot), &oldSnap)
+	json.Unmarshal([]byte(targetVersion.Snapshot), &newSnap)
 
 	diffs := computeDiff("", oldSnap, newSnap)
 
@@ -181,7 +181,7 @@ func (h *Handler) RollbackVersion(c *gin.Context) {
 	}
 
 	var snap map[string]interface{}
-	json.Unmarshal(version.Snapshot.(json.RawMessage), &snap)
+	json.Unmarshal([]byte(version.Snapshot), &snap)
 
 	var oldAPI models.API
 	h.db.Get(&oldAPI, "SELECT * FROM apis WHERE id = $1", apiID)
@@ -200,7 +200,7 @@ func (h *Handler) RollbackVersion(c *gin.Context) {
 		`UPDATE apis SET path = $1, method = $2, description = $3, params = $4,
 		 request_body = $5, responses = $6, tags = $7, updated_at = NOW() WHERE id = $8`,
 		snap["path"], snap["method"], snap["description"],
-		paramsJSON, bodyJSON, responsesJSON, tags, apiID,
+		models.JSONB(paramsJSON), models.JSONB(bodyJSON), models.JSONB(responsesJSON), models.StringArray(tags), apiID,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to rollback"})

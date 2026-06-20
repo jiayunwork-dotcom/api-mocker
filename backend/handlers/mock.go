@@ -71,8 +71,8 @@ func (h *Handler) serveMock(c *gin.Context, apiData *models.API, projectID strin
 	condCtx := h.buildConditionContext(c)
 
 	for _, scenario := range scenarios {
-		if scenario.Conditions != nil {
-			conditionsJSON, _ := json.Marshal(scenario.Conditions)
+		if len(scenario.Conditions) > 0 {
+			conditionsJSON := []byte(scenario.Conditions)
 			if matcher.Match(conditionsJSON, condCtx) {
 				h.respondWithScenario(c, &scenario, projectID)
 				return
@@ -89,13 +89,8 @@ func (h *Handler) respondWithScenario(c *gin.Context, scenario *models.MockScena
 	}
 
 	var responseBody interface{}
-	if scenario.Response != nil {
-		switch v := scenario.Response.(type) {
-		case json.RawMessage:
-			json.Unmarshal(v, &responseBody)
-		default:
-			responseBody = v
-		}
+	if len(scenario.Response) > 0 {
+		json.Unmarshal(scenario.Response, &responseBody)
 	}
 
 	c.JSON(scenario.StatusCode, responseBody)

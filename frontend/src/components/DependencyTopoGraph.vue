@@ -128,6 +128,7 @@
 import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 
 const props = defineProps({
+  projectId: { type: String, default: '' },
   dependencies: { type: Array, default: () => [] },
   apis: { type: Array, default: () => [] },
   impactReports: { type: Array, default: () => [] }
@@ -164,13 +165,7 @@ const methodColors = {
 }
 
 const storageKey = computed(() => {
-  const allIds = new Set()
-  props.apis.forEach(a => allIds.add(a.id))
-  props.dependencies.forEach(d => {
-    allIds.add(d.upstream_api_id)
-    allIds.add(d.downstream_api_id)
-  })
-  return 'topo-positions-' + Array.from(allIds).sort().join('-')
+  return 'topo-positions-' + props.projectId
 })
 
 function loadPositions() {

@@ -47,6 +47,10 @@ func main() {
 
 	r := gin.Default()
 
+	h := handlers.New(db, rdb, cfg, scheduler, wsHub)
+
+	r.GET("/api/projects/:projectId/probes/ws", h.ProbeWebSocket)
+
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -61,12 +65,8 @@ func main() {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
-	h := handlers.New(db, rdb, cfg, scheduler, wsHub)
-
 	api := r.Group("/api")
 	{
-		api.GET("/projects/:projectId/probes/ws", h.ProbeWebSocket)
-
 		auth := api.Group("")
 		auth.Use(authMiddleware)
 		{

@@ -39,6 +39,8 @@ const breakAlert = ref({
 })
 
 const wsConnections = ref({})
+const wsReconnectAttempts = ref({})
+const wsReconnectTimers = ref({})
 
 function handleAlertClick() {
   if (breakAlert.value.projectId && breakAlert.value.reportId) {
@@ -55,11 +57,18 @@ function connectWebSocket(projectId) {
     return wsConnections.value[projectId]
   }
 
+  clearWsReconnect(projectId)
+
   const token = localStorage.getItem('token')
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const wsUrl = `${protocol}//${window.location.host}/api/projects/${projectId}/probes/ws?token=${token}`
 
   const ws = new WebSocket(wsUrl)
+
+  ws.onopen = () => {
+    console.log('[WebSocket] Connection opened for project:', projectId)
+    wsReconnectAttempts.value[projectId] = 0
+  }
 
   ws.onmessage = (event) => {
     console.log('[WebSocket] Message received:', event.data)
@@ -90,21 +99,39 @@ function connectWebSocket(projectId) {
     console.error('[WebSocket] Connection error:', error)
   }
 
-  ws.onopen = () => {
-    console.log('[WebSocket] Connection opened for project:', projectId)
-  }
-
   ws.onclose = () => {
     console.log('[WebSocket] Connection closed for project:', projectId)
     delete wsConnections.value[projectId]
+    scheduleWsReconnect(projectId)
   }
 
   wsConnections.value[projectId] = ws
   return ws
 }
 
+function scheduleWsReconnect(projectId) {
+  if (wsReconnectTimers.value[projectId]) return
+  if (!wsReconnectAttempts.value[projectId]) wsReconnectAttempts.value[projectId] = 0
+  const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts.value[projectId]), 30000)
+  wsReconnectAttempts.value[projectId]++
+  console.log(`[WebSocket] Reconnecting project ${projectId} in ${delay}ms (attempt ${wsReconnectAttempts.value[projectId]})`)
+  wsReconnectTimers.value[projectId] = setTimeout(() => {
+    delete wsReconnectTimers.value[projectId]
+    connectWebSocket(projectId)
+  }, delay)
+}
+
+function clearWsReconnect(projectId) {
+  if (wsReconnectTimers.value[projectId]) {
+    clearTimeout(wsReconnectTimers.value[projectId])
+    delete wsReconnectTimers.value[projectId]
+  }
+}
+
 function closeWebSocket(projectId) {
+  clearWsReconnect(projectId)
   if (wsConnections.value[projectId]) {
+    wsConnections.value[projectId].onclose = null
     wsConnections.value[projectId].close()
     delete wsConnections.value[projectId]
   }

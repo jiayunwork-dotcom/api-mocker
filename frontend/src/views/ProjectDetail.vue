@@ -78,6 +78,7 @@
               </div>
             </div>
             <DependencyTopoGraph
+              :projectId="projectId"
               :dependencies="dependencies"
               :apis="apis"
               :impactReports="impactReports"

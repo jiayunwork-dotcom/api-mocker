@@ -271,6 +271,8 @@ const editingProbeId = ref('')
 
 let refreshTimer = null
 let ws = null
+let wsReconnectTimer = null
+let wsReconnectAttempts = 0
 
 const enabledCount = computed(() => dashboard.value.probes?.filter(p => p.enabled).length || 0)
 
@@ -679,7 +681,9 @@ function getRowClass({ row }) {
 function connectWebSocket() {
   if (ws) {
     ws.close()
+    ws = null
   }
+  stopWsReconnect()
 
   const token = localStorage.getItem('token')
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -690,12 +694,10 @@ function connectWebSocket() {
 
   try {
     ws = new WebSocket(wsUrl)
-    if (token) {
-      ws.binaryType = 'arraybuffer'
-    }
 
     ws.onopen = () => {
       console.log('[WebSocket] Connected')
+      wsReconnectAttempts = 0
     }
 
     ws.onmessage = (event) => {
@@ -711,6 +713,8 @@ function connectWebSocket() {
 
     ws.onclose = () => {
       console.log('[WebSocket] Disconnected')
+      ws = null
+      scheduleWsReconnect()
     }
 
     ws.onerror = (err) => {
@@ -718,6 +722,26 @@ function connectWebSocket() {
     }
   } catch (e) {
     console.error('[WebSocket] Connection failed:', e)
+    ws = null
+    scheduleWsReconnect()
+  }
+}
+
+function scheduleWsReconnect() {
+  if (wsReconnectTimer) return
+  const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts), 30000)
+  wsReconnectAttempts++
+  console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${wsReconnectAttempts})`)
+  wsReconnectTimer = setTimeout(() => {
+    wsReconnectTimer = null
+    connectWebSocket()
+  }, delay)
+}
+
+function stopWsReconnect() {
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer)
+    wsReconnectTimer = null
   }
 }
 
@@ -761,7 +785,12 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (refreshTimer) clearInterval(refreshTimer)
-  if (ws) ws.close()
+  stopWsReconnect()
+  if (ws) {
+    ws.onclose = null
+    ws.close()
+    ws = null
+  }
 })
 </script>
 

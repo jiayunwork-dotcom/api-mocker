@@ -68,10 +68,29 @@
         </el-tab-pane>
 
         <el-tab-pane label="依赖图谱" name="dependency">
+          <div class="topo-section">
+            <div class="section-header">
+              <div class="section-title" style="margin:0">依赖拓扑图</div>
+              <div class="topo-legend">
+                <span class="legend-item"><span class="legend-dot" style="background:#f56c6c"></span>Breaking</span>
+                <span class="legend-item"><span class="legend-dot" style="background:#e6a23c"></span>Warning</span>
+                <span class="legend-item"><span class="legend-dot" style="background:#c0c4cc"></span>正常</span>
+              </div>
+            </div>
+            <DependencyTopoGraph
+              :dependencies="dependencies"
+              :apis="apis"
+              :impactReports="impactReports"
+            />
+          </div>
+
           <div class="dependency-section">
             <div class="section-header">
               <div class="section-title" style="margin:0">依赖关系管理</div>
-              <el-button type="primary" @click="openDepDialog()">新建依赖</el-button>
+              <div class="dep-actions">
+                <el-button @click="showBatchDepDialog = true">批量导入</el-button>
+                <el-button type="primary" @click="openDepDialog()">新建依赖</el-button>
+              </div>
             </div>
 
             <el-table
@@ -359,16 +378,127 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="showBatchDepDialog"
+      title="批量导入依赖关系"
+      width="700px"
+      :close-on-click-modal="false"
+    >
+      <div class="batch-dep-hint">
+        请粘贴JSON格式的依赖关系数组，格式示例：
+        <pre class="batch-dep-example">[
+  {
+    "upstream": "GET /users",
+    "downstream": "POST /orders",
+    "mappings": [{"from": "id", "to": "userId"}]
+  }
+]</pre>
+      </div>
+      <el-input
+        v-model="batchDepContent"
+        type="textarea"
+        :rows="12"
+        placeholder='[{"upstream":"GET /users","downstream":"POST /orders","mappings":[{"from":"id","to":"userId"}]}]'
+        resize="none"
+      />
+      <div v-if="batchDepError" class="error-alert" style="margin-top:12px">
+        <el-alert :title="batchDepError" type="error" :closable="false" show-icon />
+      </div>
+      <div v-if="batchDepResult" style="margin-top:12px">
+        <el-alert type="success" :closable="false" show-icon>
+          <template #title>
+            <div class="result-summary">
+              <span>导入完成：</span>
+              <el-tag type="success">成功 {{ batchDepResult.created }} 条</el-tag>
+              <el-tag type="warning" v-if="batchDepResult.skipped > 0">跳过 {{ batchDepResult.skipped }} 条</el-tag>
+            </div>
+          </template>
+        </el-alert>
+      </div>
+      <template #footer>
+        <el-button @click="closeBatchDepDialog">关闭</el-button>
+        <el-button type="primary" :loading="batchDepLoading" @click="doBatchDepImport">确认导入</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="showReportDetail"
+      title="影响报告详情"
+      width="700px"
+      :close-on-click-modal="false"
+    >
+      <div v-if="reportDetail" class="report-detail-content">
+        <div class="report-detail-section">
+          <div class="report-detail-label">变更接口：</div>
+          <div>
+            <span :class="['method-badge', `method-${reportDetail.changed_api_method?.toLowerCase()}`]">
+              {{ reportDetail.changed_api_method }}
+            </span>
+            <span class="dep-path">{{ reportDetail.changed_api_path }}</span>
+          </div>
+        </div>
+        <div class="report-detail-section">
+          <div class="report-detail-label">变更类型：</div>
+          <el-tag :type="getChangeTypeTag(reportDetail.change_type)" size="small">
+            {{ getChangeTypeLabel(reportDetail.change_type) }}
+          </el-tag>
+        </div>
+        <div class="report-detail-section">
+          <div class="report-detail-label">操作人：</div>
+          <div>{{ reportDetail.user_name }}</div>
+        </div>
+
+        <div class="report-detail-section">
+          <div class="report-detail-label">变更字段：</div>
+          <ul class="report-detail-list">
+            <li v-for="(f, i) in parseAffected(reportDetail.changed_fields)" :key="i">
+              {{ f.fieldPath }}
+              <el-tag size="small" :type="f.changeType === 'delete' ? 'danger' : f.changeType === 'type_change' ? 'danger' : 'warning'" style="margin-left:8px">
+                {{ f.changeType === 'delete' ? '删除' : f.changeType === 'type_change' ? f.oldType + ' → ' + f.newType : f.oldName + ' → ' + f.newName }}
+              </el-tag>
+            </li>
+          </ul>
+        </div>
+
+        <div class="report-detail-section">
+          <div class="report-detail-label">直接受影响下游：</div>
+          <ul class="report-detail-list">
+            <li v-for="(d, i) in parseAffected(reportDetail.affected_downstream)" :key="i">
+              <span :class="['method-badge', `method-${d.downstream_method?.toLowerCase()}`]">{{ d.downstream_method }}</span>
+              <span class="dep-path">{{ d.downstream_path }}</span>
+              <el-tag size="small" :type="d.impact_level === 'Breaking' ? 'danger' : 'warning'" style="margin-left:8px">{{ d.impact_level }}</el-tag>
+              <div class="affected-mapping-text">受影响映射：{{ d.affected_mappings.join(', ') }}</div>
+            </li>
+          </ul>
+        </div>
+
+        <div class="report-detail-section" v-if="impactChain.length > 0">
+          <div class="report-detail-label">影响链路追踪：</div>
+          <div class="chain-tree">
+            <chain-node
+              v-for="(node, i) in impactChain"
+              :key="i"
+              :node="node"
+            />
+          </div>
+        </div>
+        <div v-else-if="chainLoading" class="chain-loading">
+          <el-icon class="is-loading"><Loading /></el-icon> 正在加载链路...
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, watch, inject, onUnmounted } from 'vue'
+import { ref, onMounted, watch, inject, onUnmounted, h, defineComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { InfoFilled, UploadFilled, Document, Right } from '@element-plus/icons-vue'
+import { InfoFilled, UploadFilled, Document, Right, Loading } from '@element-plus/icons-vue'
 import { apiDefAPI, activityAPI, dependencyAPI, impactReportAPI, projectAPI } from '../api'
 import HealthMonitor from '../components/HealthMonitor.vue'
+import DependencyTopoGraph from '../components/DependencyTopoGraph.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -405,6 +535,56 @@ const depForm = ref({
   upstream_api_id: '',
   downstream_api_id: '',
   field_mappings: [{ upstreamField: '', downstreamField: '' }]
+})
+
+const showBatchDepDialog = ref(false)
+const batchDepContent = ref('')
+const batchDepLoading = ref(false)
+const batchDepError = ref('')
+const batchDepResult = ref(null)
+
+const showReportDetail = ref(false)
+const reportDetail = ref(null)
+const impactChain = ref([])
+const chainLoading = ref(false)
+
+const ChainNode = defineComponent({
+  name: 'ChainNode',
+  props: {
+    node: { type: Object, required: true }
+  },
+  setup(props) {
+    return () => {
+      const n = props.node
+      const levelTag = n.impact === 'Breaking'
+        ? h('el-tag', { type: 'danger', size: 'small', style: 'margin-left:8px' }, 'Breaking')
+        : n.impact === 'Warning'
+          ? h('el-tag', { type: 'warning', size: 'small', style: 'margin-left:8px' }, 'Warning')
+          : n.impact === 'indirect'
+            ? h('el-tag', { type: 'info', size: 'small', style: 'margin-left:8px' }, '间接影响')
+            : null
+
+      const mappingText = n.mappings && n.mappings.length > 0
+        ? h('div', { style: 'color:#909399;font-size:12px;margin-top:4px' },
+            '映射：' + n.mappings.join(', '))
+        : null
+
+      const children = n.children && n.children.length > 0
+        ? h('div', { class: 'chain-children' },
+            n.children.map((child, i) => h(ChainNode, { node: child, key: i })))
+        : null
+
+      return h('div', { class: 'chain-node-item' }, [
+        h('div', { class: 'chain-node-header' }, [
+          h('span', { class: `method-badge method-${n.method?.toLowerCase()}` }, n.method),
+          h('span', { class: 'dep-path' }, n.path),
+          levelTag
+        ]),
+        mappingText,
+        children
+      ])
+    }
+  }
 })
 
 async function loadProject() {
@@ -659,38 +839,74 @@ async function saveDependency() {
   } catch {}
 }
 
-function viewReport(report) {
-  ElMessageBox.alert(
-    `
-      <div style="text-align:left">
-        <p><strong>变更接口：</strong>${report.changed_api_method} ${report.changed_api_path}</p>
-        <p><strong>变更类型：</strong>${getChangeTypeLabel(report.change_type)}</p>
-        <p><strong>操作人：</strong>${report.user_name}</p>
-        <p><strong>变更字段：</strong></p>
-        <ul>
-          ${parseAffected(report.changed_fields).map(f => `
-            <li>${f.fieldPath} (${f.changeType === 'delete' ? '删除' : f.changeType === 'type_change' ? '类型变更：' + f.oldType + ' → ' + f.newType : '重命名：' + f.oldName + ' → ' + f.newName})</li>
-          `).join('')}
-        </ul>
-        <p><strong>受影响下游：</strong></p>
-        <ul>
-          ${parseAffected(report.affected_downstream).map(d => `
-            <li>
-              ${d.downstream_method} ${d.downstream_path}
-              <el-tag size="small" type="${d.impact_level === 'Breaking' ? 'danger' : 'warning'}" style="margin-left:8px">${d.impact_level}</el-tag>
-              <br/>
-              <span style="color:#909399;font-size:12px">受影响映射：${d.affected_mappings.join(', ')}</span>
-            </li>
-          `).join('')}
-        </ul>
-      </div>
-    `,
-    '影响报告详情',
-    {
-      dangerouslyUseHTMLString: true,
-      width: '600px'
+async function viewReport(report) {
+  reportDetail.value = report
+  impactChain.value = []
+  showReportDetail.value = true
+  chainLoading.value = true
+
+  try {
+    const res = await impactReportAPI.getChain(projectId, report.id)
+    impactChain.value = res.chain || []
+  } catch {
+    impactChain.value = []
+  } finally {
+    chainLoading.value = false
+  }
+}
+
+function closeBatchDepDialog() {
+  showBatchDepDialog.value = false
+  batchDepContent.value = ''
+  batchDepError.value = ''
+  batchDepResult.value = null
+}
+
+async function doBatchDepImport() {
+  batchDepError.value = ''
+  batchDepResult.value = null
+  batchDepLoading.value = true
+
+  try {
+    if (!batchDepContent.value.trim()) {
+      batchDepError.value = '请输入JSON格式的依赖关系'
+      batchDepLoading.value = false
+      return
     }
-  )
+
+    let items
+    try {
+      items = JSON.parse(batchDepContent.value)
+    } catch {
+      batchDepError.value = 'JSON格式不正确，请检查输入'
+      batchDepLoading.value = false
+      return
+    }
+
+    if (!Array.isArray(items)) {
+      batchDepError.value = '输入必须是JSON数组格式'
+      batchDepLoading.value = false
+      return
+    }
+
+    const res = await dependencyAPI.batchCreate(projectId, items)
+    batchDepResult.value = res
+
+    if (res.created > 0) {
+      ElMessage.success(`成功导入 ${res.created} 条依赖关系`)
+      loadDependencies()
+    } else if (res.skipped > 0) {
+      ElMessage.warning(`所有依赖均已存在或接口不匹配，共跳过 ${res.skipped} 条`)
+    }
+  } catch (err) {
+    if (err.response && err.response.data && err.response.data.error) {
+      batchDepError.value = err.response.data.error
+    } else {
+      batchDepError.value = '导入失败，请检查网络连接或稍后重试'
+    }
+  } finally {
+    batchDepLoading.value = false
+  }
 }
 
 async function doImport() {
@@ -1046,5 +1262,115 @@ onUnmounted(() => {
 .mapping-icon {
   color: #409eff;
   font-weight: bold;
+}
+
+.topo-section {
+  background: #fff;
+  border-radius: 8px;
+  padding: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  margin-bottom: 20px;
+}
+
+.topo-legend {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  font-size: 13px;
+  color: #606266;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.dep-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.batch-dep-hint {
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: #606266;
+}
+
+.batch-dep-example {
+  background: #f5f7fa;
+  border-radius: 4px;
+  padding: 12px;
+  font-size: 12px;
+  font-family: SF Mono, Fira Code, monospace;
+  margin-top: 8px;
+  color: #303133;
+  overflow-x: auto;
+}
+
+.report-detail-content {
+  text-align: left;
+}
+
+.report-detail-section {
+  margin-bottom: 16px;
+}
+
+.report-detail-label {
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 8px;
+}
+
+.report-detail-list {
+  padding-left: 20px;
+  margin: 0;
+}
+
+.report-detail-list li {
+  margin-bottom: 8px;
+  line-height: 1.6;
+}
+
+.affected-mapping-text {
+  color: #909399;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.chain-tree {
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  padding: 16px;
+  background: #fafafa;
+}
+
+.chain-node-item {
+  padding: 8px 0;
+}
+
+.chain-node-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chain-children {
+  margin-left: 32px;
+  padding-left: 12px;
+  border-left: 2px solid #dcdfe6;
+}
+
+.chain-loading {
+  text-align: center;
+  padding: 16px;
+  color: #909399;
 }
 </style>

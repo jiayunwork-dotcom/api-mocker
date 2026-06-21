@@ -158,6 +158,7 @@ func main() {
 			{
 				dependencies.GET("", h.ListDependencies)
 				dependencies.POST("", h.CreateDependency)
+				dependencies.POST("/batch", h.BatchCreateDependencies)
 				dependencies.PUT("/:id", h.UpdateDependency)
 				dependencies.DELETE("/:id", h.DeleteDependency)
 			}
@@ -166,6 +167,7 @@ func main() {
 			{
 				impactReports.GET("", h.ListImpactReports)
 				impactReports.GET("/:id", h.GetImpactReport)
+				impactReports.GET("/:id/chain", h.GetImpactChain)
 			}
 		}
 

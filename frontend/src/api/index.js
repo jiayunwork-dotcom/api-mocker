@@ -136,13 +136,15 @@ export const probeAPI = {
 export const dependencyAPI = {
   list: (projectId) => api.get(`/projects/${projectId}/dependencies`),
   create: (projectId, data) => api.post(`/projects/${projectId}/dependencies`, data),
+  batchCreate: (projectId, data) => api.post(`/projects/${projectId}/dependencies/batch`, data),
   update: (projectId, id, data) => api.put(`/projects/${projectId}/dependencies/${id}`, data),
   delete: (projectId, id) => api.delete(`/projects/${projectId}/dependencies/${id}`)
 }
 
 export const impactReportAPI = {
   list: (projectId) => api.get(`/projects/${projectId}/impact-reports`),
-  get: (projectId, id) => api.get(`/projects/${projectId}/impact-reports/${id}`)
+  get: (projectId, id) => api.get(`/projects/${projectId}/impact-reports/${id}`),
+  getChain: (projectId, id) => api.get(`/projects/${projectId}/impact-reports/${id}/chain`)
 }
 
 export default api

@@ -97,6 +97,24 @@ func (h *Handler) GetProject(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"project": project})
 }
 
+func (h *Handler) GetProjectByID(c *gin.Context) {
+	projectID := c.Param("projectId")
+
+	if !h.canAccessProject(c, projectID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "No access to project"})
+		return
+	}
+
+	var project models.Project
+	err := h.db.Get(&project, "SELECT * FROM projects WHERE id = $1", projectID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"project": project})
+}
+
 func (h *Handler) UpdateProject(c *gin.Context) {
 	projectID := c.Param("projectId")
 	workspaceID := c.Param("workspaceId")

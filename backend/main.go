@@ -98,6 +98,8 @@ func main() {
 				models.DELETE("/:id", h.DeleteModel)
 			}
 
+			auth.GET("/projects/:projectId", h.GetProjectByID)
+
 			apis := auth.Group("/projects/:projectId/apis")
 			{
 				apis.GET("", h.ListAPIs)

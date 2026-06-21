@@ -24,10 +24,6 @@ func flattenFields(fields []models.BodyField, prefix string) []flatField {
 		}
 		result = append(result, flatField{path: path, name: f.Name, typ: f.Type})
 
-		if len(f.Children) > 0 {
-			result = append(result, flattenFields(f.Children, path)...)
-		}
-
 		if f.Type == "array" && len(f.Children) > 0 {
 			for _, child := range f.Children {
 				childPath := path + "[*]." + child.Name
@@ -36,6 +32,8 @@ func flattenFields(fields []models.BodyField, prefix string) []flatField {
 					result = append(result, flattenFields(child.Children, childPath)...)
 				}
 			}
+		} else if len(f.Children) > 0 {
+			result = append(result, flattenFields(f.Children, path)...)
 		}
 	}
 	return result
@@ -101,32 +99,48 @@ func compareResponseFields(oldResp, newResp models.JSONB) []fieldChange {
 		}
 	}
 
-	oldNameMap := make(map[string]flatField)
-	for _, f := range oldFields {
-		oldNameMap[f.name] = f
+	deletedPaths := make(map[string]bool)
+	for _, ch := range changes {
+		if ch.changeType == "delete" {
+			deletedPaths[ch.fieldPath] = true
+		}
 	}
 
-	newNameMap := make(map[string]flatField)
-	for _, f := range newFields {
-		newNameMap[f.name] = f
-	}
+	matchedNewPaths := make(map[string]bool)
+	for _, oldF := range oldFields {
+		if deletedPaths[oldF.path] {
+			continue
+		}
+		if _, exists := newFieldMap[oldF.path]; !exists {
+			parentPath := ""
+			dotIdx := strings.LastIndex(oldF.path, ".")
+			if dotIdx >= 0 {
+				parentPath = oldF.path[:dotIdx]
+			}
 
-	for oldName, oldF := range oldNameMap {
-		if _, exists := newNameMap[oldName]; !exists {
-			for newName, newF := range newNameMap {
-				if _, existsInOld := oldNameMap[newName]; !existsInOld {
-					if oldF.typ == newF.typ && oldF.path != newF.path {
-						oldPathParts := strings.Split(oldF.path, ".")
-						oldPathParts[len(oldPathParts)-1] = newName
-						if strings.Join(oldPathParts, ".") == newF.path {
-							changes = append(changes, fieldChange{
-								changeType: "rename",
-								fieldPath:  oldF.path,
-								oldField:   &oldF,
-								newField:   &newF,
-							})
-						}
-					}
+			for _, newF := range newFields {
+				if _, exists := oldFieldMap[newF.path]; exists {
+					continue
+				}
+				if matchedNewPaths[newF.path] {
+					continue
+				}
+
+				newParentPath := ""
+				newDotIdx := strings.LastIndex(newF.path, ".")
+				if newDotIdx >= 0 {
+					newParentPath = newF.path[:newDotIdx]
+				}
+
+				if parentPath == newParentPath && oldF.typ == newF.typ && oldF.name != newF.name {
+					changes = append(changes, fieldChange{
+						changeType: "rename",
+						fieldPath:  oldF.path,
+						oldField:   &oldF,
+						newField:   &newF,
+					})
+					matchedNewPaths[newF.path] = true
+					break
 				}
 			}
 		}

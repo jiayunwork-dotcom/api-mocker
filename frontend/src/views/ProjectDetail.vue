@@ -367,7 +367,7 @@ import { ref, onMounted, watch, inject, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { InfoFilled, UploadFilled, Document, Right } from '@element-plus/icons-vue'
-import { apiDefAPI, activityAPI, dependencyAPI, impactReportAPI } from '../api'
+import { apiDefAPI, activityAPI, dependencyAPI, impactReportAPI, projectAPI } from '../api'
 import HealthMonitor from '../components/HealthMonitor.vue'
 
 const route = useRoute()
@@ -408,7 +408,12 @@ const depForm = ref({
 })
 
 async function loadProject() {
-  project.value = { id: projectId, name: '加载中...', description: '' }
+  try {
+    const res = await projectAPI.getById(projectId)
+    project.value = res.project
+  } catch {
+    project.value = { id: projectId, name: '加载中...', description: '' }
+  }
 }
 
 async function loadApis() {

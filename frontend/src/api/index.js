@@ -60,6 +60,7 @@ export const projectAPI = {
   list: (wsId) => api.get(`/workspaces/${wsId}/projects`),
   create: (wsId, data) => api.post(`/workspaces/${wsId}/projects`, data),
   get: (wsId, id) => api.get(`/workspaces/${wsId}/projects/${id}`),
+  getById: (id) => api.get(`/projects/${id}`),
   update: (wsId, id, data) => api.put(`/workspaces/${wsId}/projects/${id}`, data),
   delete: (wsId, id) => api.delete(`/workspaces/${wsId}/projects/${id}`)
 }

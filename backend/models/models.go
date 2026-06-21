@@ -19,9 +19,14 @@ func (j JSONB) Value() (driver.Value, error) {
 }
 
 func (j *JSONB) Scan(value interface{}) error {
-	bytes, ok := value.([]byte)
-	if !ok {
-		return errors.New("failed to unmarshal JSONB value")
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return errors.New("failed to unmarshal JSONB value: unsupported type")
 	}
 	result := JSONB(bytes)
 	*j = result
@@ -51,7 +56,8 @@ func (s *StringArray) Scan(src interface{}) error {
 	if err := arr.Scan(src); err != nil {
 		return err
 	}
-	*s = StringArray(arr)
+	*s = make(StringArray, len(arr))
+	copy(*s, arr)
 	return nil
 }
 

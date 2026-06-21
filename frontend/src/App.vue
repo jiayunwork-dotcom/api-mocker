@@ -62,9 +62,12 @@ function connectWebSocket(projectId) {
   const ws = new WebSocket(wsUrl)
 
   ws.onmessage = (event) => {
+    console.log('[WebSocket] Message received:', event.data)
     try {
       const data = JSON.parse(event.data)
+      console.log('[WebSocket] Parsed message:', data)
       if (data.eventType === 'dependency_break') {
+        console.log('[WebSocket] dependency_break event, showing alert')
         breakAlert.value = {
           show: true,
           apiPath: data.changedApiPath,
@@ -79,15 +82,20 @@ function connectWebSocket(projectId) {
         }
       }
     } catch (e) {
-      console.error('Failed to parse WebSocket message:', e)
+      console.error('[WebSocket] Failed to parse message:', e, event.data)
     }
   }
 
   ws.onerror = (error) => {
-    console.error('WebSocket error:', error)
+    console.error('[WebSocket] Connection error:', error)
+  }
+
+  ws.onopen = () => {
+    console.log('[WebSocket] Connection opened for project:', projectId)
   }
 
   ws.onclose = () => {
+    console.log('[WebSocket] Connection closed for project:', projectId)
     delete wsConnections.value[projectId]
   }
 

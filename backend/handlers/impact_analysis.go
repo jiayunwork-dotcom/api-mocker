@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"strings"
 
 	"github.com/google/uuid"
@@ -64,6 +65,9 @@ func compareResponseFields(oldResp, newResp models.JSONB) []fieldChange {
 	oldFields := flattenFields(extractResponseBody(oldResp), "")
 	newFields := flattenFields(extractResponseBody(newResp), "")
 
+	log.Printf("[impact-analysis] old fields: %+v", oldFields)
+	log.Printf("[impact-analysis] new fields: %+v", newFields)
+
 	oldFieldMap := make(map[string]flatField)
 	for _, f := range oldFields {
 		oldFieldMap[f.path] = f
@@ -78,6 +82,7 @@ func compareResponseFields(oldResp, newResp models.JSONB) []fieldChange {
 
 	for path, oldF := range oldFieldMap {
 		if _, exists := newFieldMap[path]; !exists {
+			log.Printf("[impact-analysis] detected delete: %s", path)
 			changes = append(changes, fieldChange{
 				changeType: "delete",
 				fieldPath:  path,
@@ -89,6 +94,7 @@ func compareResponseFields(oldResp, newResp models.JSONB) []fieldChange {
 	for path, newF := range newFieldMap {
 		if oldF, exists := oldFieldMap[path]; exists {
 			if oldF.typ != newF.typ {
+				log.Printf("[impact-analysis] detected type_change: %s (%s -> %s)", path, oldF.typ, newF.typ)
 				changes = append(changes, fieldChange{
 					changeType: "type_change",
 					fieldPath:  path,
@@ -151,6 +157,7 @@ func compareResponseFields(oldResp, newResp models.JSONB) []fieldChange {
 
 func (h *Handler) analyzeImpact(apiID, projectID, userID string, oldAPI, newAPI models.API) (*models.ImpactReport, error) {
 	changes := compareResponseFields(oldAPI.Responses, newAPI.Responses)
+	log.Printf("[impact-analysis] api=%s changes count=%d", apiID, len(changes))
 	if len(changes) == 0 {
 		return nil, nil
 	}
@@ -169,11 +176,18 @@ func (h *Handler) analyzeImpact(apiID, projectID, userID string, oldAPI, newAPI 
 		WHERE d.upstream_api_id = $1
 	`, apiID)
 	if err != nil {
+		log.Printf("[impact-analysis] failed to query deps: %v", err)
 		return nil, err
 	}
 
+	log.Printf("[impact-analysis] api=%s deps count=%d", apiID, len(deps))
 	if len(deps) == 0 {
 		return nil, nil
+	}
+
+	for i, d := range deps {
+		log.Printf("[impact-analysis] dep[%d] downstream=%s field_mappings=%s",
+			i, d.DownstreamPath, string(d.FieldMappings))
 	}
 
 	var changedFields []models.ChangedField
@@ -199,15 +213,38 @@ func (h *Handler) analyzeImpact(apiID, projectID, userID string, oldAPI, newAPI 
 	for _, dep := range deps {
 		var mappings []models.FieldMapping
 		json.Unmarshal([]byte(dep.FieldMappings), &mappings)
+		log.Printf("[impact-analysis] checking dep downstream=%s, mappings=%+v", dep.DownstreamPath, mappings)
 
 		var affectedMappings []string
 		impactLevel := ""
 
 		for _, mapping := range mappings {
 			for _, ch := range changes {
-				if mapping.UpstreamField == ch.fieldPath ||
-				   (ch.oldField != nil && mapping.UpstreamField == ch.oldField.path) ||
-				   (ch.newField != nil && mapping.UpstreamField == ch.newField.path) {
+				changePaths := []string{ch.fieldPath}
+				if ch.oldField != nil {
+					changePaths = append(changePaths, ch.oldField.path)
+				}
+				if ch.newField != nil {
+					changePaths = append(changePaths, ch.newField.path)
+				}
+
+				normalizedMappingPath := strings.ReplaceAll(mapping.UpstreamField, "[*]", "")
+
+				matched := false
+				for _, cp := range changePaths {
+					normalizedChangePath := strings.ReplaceAll(cp, "[*]", "")
+					if mapping.UpstreamField == cp ||
+					   normalizedMappingPath == cp ||
+					   mapping.UpstreamField == normalizedChangePath ||
+					   normalizedMappingPath == normalizedChangePath {
+						matched = true
+						break
+					}
+				}
+
+				if matched {
+					log.Printf("[impact-analysis] MATCHED: mapping=%s change=%s type=%s",
+						mapping.UpstreamField, ch.fieldPath, ch.changeType)
 
 					affectedMappings = append(affectedMappings,
 						mapping.UpstreamField+" -> "+mapping.DownstreamField)
@@ -234,8 +271,12 @@ func (h *Handler) analyzeImpact(apiID, projectID, userID string, oldAPI, newAPI 
 	}
 
 	if len(affectedDownstream) == 0 {
+		log.Printf("[impact-analysis] no affected downstream, skipping report")
 		return nil, nil
 	}
+
+	log.Printf("[impact-analysis] generating report: affected=%d, breaking=%v",
+		len(affectedDownstream), hasBreakingChange)
 
 	changeType := "mixed"
 	if len(changes) > 0 {
@@ -297,7 +338,9 @@ func (h *Handler) BroadcastDependencyBreak(projectID string, msg models.Dependen
 	msg.EventType = "dependency_break"
 	data, err := json.Marshal(msg)
 	if err != nil {
+		log.Printf("[impact-analysis] Failed to marshal break message: %v", err)
 		return
 	}
+	log.Printf("[impact-analysis] Broadcasting dependency_break to project %s: %s", projectID, string(data))
 	h.wsHub.BroadcastToProject(projectID, data)
 }

@@ -64,13 +64,18 @@ func (h *Hub) BroadcastToProject(projectID string, message []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	log.Printf("[websocket] Broadcasting to project %s, clients: %d, msg: %s",
+		projectID, len(h.projectClients[projectID]), string(message))
+
 	if clients, exists := h.projectClients[projectID]; exists {
 		for client := range clients {
 			select {
 			case client.send <- message:
+				log.Printf("[websocket] Sent to client in project %s", projectID)
 			default:
 				close(client.send)
 				delete(clients, client)
+				log.Printf("[websocket] Client buffer full, removed from project %s", projectID)
 			}
 		}
 	}

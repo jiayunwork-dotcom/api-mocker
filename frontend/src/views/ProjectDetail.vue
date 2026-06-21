@@ -521,15 +521,25 @@ async function loadImpactReports() {
 }
 
 function parseMappings(mappings) {
+  console.log('[parseMappings] input:', mappings, 'type:', typeof mappings)
   if (!mappings) return []
+  let parsed = mappings
   if (typeof mappings === 'string') {
     try {
-      return JSON.parse(mappings)
-    } catch {
+      parsed = JSON.parse(mappings)
+    } catch (e) {
+      console.error('[parseMappings] JSON.parse failed:', e)
       return []
     }
   }
-  return mappings
+  if (!Array.isArray(parsed)) {
+    console.error('[parseMappings] result is not array:', parsed)
+    return []
+  }
+  return parsed.map(m => ({
+    upstreamField: m.upstreamField || m.upstream_field || '',
+    downstreamField: m.downstreamField || m.downstream_field || ''
+  }))
 }
 
 function parseAffected(affected) {

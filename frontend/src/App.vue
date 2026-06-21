@@ -75,6 +75,7 @@ function connectWebSocket(projectId) {
     try {
       const data = JSON.parse(event.data)
       console.log('[WebSocket] Parsed message:', data)
+
       if (data.eventType === 'dependency_break') {
         console.log('[WebSocket] dependency_break event, showing alert')
         breakAlert.value = {
@@ -87,6 +88,12 @@ function connectWebSocket(projectId) {
 
         if (route.params.id === data.projectId) {
           const event = new CustomEvent('dependency-break', { detail: data })
+          window.dispatchEvent(event)
+        }
+      } else if (data.eventType === 'status_change') {
+        console.log('[WebSocket] status_change event, dispatching')
+        if (route.params.id === data.projectId) {
+          const event = new CustomEvent('probe-status-change', { detail: data })
           window.dispatchEvent(event)
         }
       }
@@ -112,9 +119,16 @@ function connectWebSocket(projectId) {
 function scheduleWsReconnect(projectId) {
   if (wsReconnectTimers.value[projectId]) return
   if (!wsReconnectAttempts.value[projectId]) wsReconnectAttempts.value[projectId] = 0
+
+  const maxAttempts = 10
+  if (wsReconnectAttempts.value[projectId] >= maxAttempts) {
+    console.log(`[WebSocket] Max reconnect attempts (${maxAttempts}) reached for project ${projectId}, stopping`)
+    return
+  }
+
   const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts.value[projectId]), 30000)
   wsReconnectAttempts.value[projectId]++
-  console.log(`[WebSocket] Reconnecting project ${projectId} in ${delay}ms (attempt ${wsReconnectAttempts.value[projectId]})`)
+  console.log(`[WebSocket] Reconnecting project ${projectId} in ${delay}ms (attempt ${wsReconnectAttempts.value[projectId]}/${maxAttempts})`)
   wsReconnectTimers.value[projectId] = setTimeout(() => {
     delete wsReconnectTimers.value[projectId]
     connectWebSocket(projectId)

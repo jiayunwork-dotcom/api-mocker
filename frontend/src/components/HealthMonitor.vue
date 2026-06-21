@@ -231,7 +231,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch, inject } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import { probeAPI, apiDefAPI } from '../api'
@@ -239,6 +239,9 @@ import { probeAPI, apiDefAPI } from '../api'
 const props = defineProps({
   projectId: { type: String, required: true }
 })
+
+const wsConnect = inject('wsConnect')
+const wsClose = inject('wsClose')
 
 const dashboard = ref({ summary: {}, probes: [], groups: [] })
 const allProbes = ref([])
@@ -271,8 +274,8 @@ const editingProbeId = ref('')
 
 let refreshTimer = null
 let ws = null
-let wsReconnectTimer = null
-let wsReconnectAttempts = 0
+let wsConnectFn = null
+let wsCloseFn = null
 
 const enabledCount = computed(() => dashboard.value.probes?.filter(p => p.enabled).length || 0)
 
@@ -679,70 +682,12 @@ function getRowClass({ row }) {
 }
 
 function connectWebSocket() {
-  if (ws) {
-    ws.close()
-    ws = null
-  }
-  stopWsReconnect()
-
-  const token = localStorage.getItem('token')
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  let wsUrl = `${protocol}//${window.location.host}/api/projects/${props.projectId}/probes/ws`
-  if (token) {
-    wsUrl += `?token=${encodeURIComponent(token)}`
-  }
-
-  try {
-    ws = new WebSocket(wsUrl)
-
-    ws.onopen = () => {
-      console.log('[WebSocket] Connected')
-      wsReconnectAttempts = 0
-    }
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        if (data.eventType === 'status_change') {
-          handleStatusChange(data)
-        }
-      } catch (e) {
-        console.error('[WebSocket] Parse error:', e)
-      }
-    }
-
-    ws.onclose = () => {
-      console.log('[WebSocket] Disconnected')
-      ws = null
-      scheduleWsReconnect()
-    }
-
-    ws.onerror = (err) => {
-      console.error('[WebSocket] Error:', err)
-    }
-  } catch (e) {
-    console.error('[WebSocket] Connection failed:', e)
-    ws = null
-    scheduleWsReconnect()
-  }
+  if (!wsConnect) return
+  ws = wsConnect(props.projectId)
 }
 
-function scheduleWsReconnect() {
-  if (wsReconnectTimer) return
-  const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts), 30000)
-  wsReconnectAttempts++
-  console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${wsReconnectAttempts})`)
-  wsReconnectTimer = setTimeout(() => {
-    wsReconnectTimer = null
-    connectWebSocket()
-  }, delay)
-}
-
-function stopWsReconnect() {
-  if (wsReconnectTimer) {
-    clearTimeout(wsReconnectTimer)
-    wsReconnectTimer = null
-  }
+function handleProbeStatusChange(e) {
+  handleStatusChange(e.detail)
 }
 
 function handleStatusChange(data) {
@@ -777,6 +722,7 @@ onMounted(() => {
   loadAllProbes()
   loadAPIs()
   connectWebSocket()
+  window.addEventListener('probe-status-change', handleProbeStatusChange)
   refreshTimer = setInterval(() => {
     loadDashboard()
     loadAllProbes()
@@ -785,12 +731,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (refreshTimer) clearInterval(refreshTimer)
-  stopWsReconnect()
-  if (ws) {
-    ws.onclose = null
-    ws.close()
-    ws = null
-  }
+  window.removeEventListener('probe-status-change', handleProbeStatusChange)
 })
 </script>
 

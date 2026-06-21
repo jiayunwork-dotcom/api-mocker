@@ -51,29 +51,29 @@
         </marker>
       </defs>
 
-      <g v-for="edge in edges" :key="edge.id">
+      <g v-for="edge in edgeList" :key="edge.id">
         <line
           :x1="edge.x1"
           :y1="edge.y1"
           :x2="edge.x2"
           :y2="edge.y2"
           :stroke="getEdgeColor(edge)"
-          :stroke-width="isEdgeHighlighted(edge) ? 3 : 1.5"
+          :stroke-width="edge.highlighted ? 3 : 1.5"
           :marker-end="getEdgeMarker(edge)"
-          :class="{ 'edge-highlighted': isEdgeHighlighted(edge) }"
+          :class="{ 'edge-highlighted': edge.highlighted }"
           @mouseenter="showEdgeTooltip($event, edge)"
           @mouseleave="hideEdgeTooltip"
         />
       </g>
 
       <g
-        v-for="node in nodes"
+        v-for="node in nodeList"
         :key="node.id"
         :transform="`translate(${node.x}, ${node.y})`"
         @mousedown.prevent="onNodeMouseDown($event, node)"
-        @click="onNodeClick(node)"
+        @click.stop="onNodeClick(node)"
         class="topo-node"
-        :class="{ 'node-highlighted': isNodeHighlighted(node), 'node-selected': selectedNodeId === node.id }"
+        :class="{ 'node-highlighted': node.highlighted, 'node-selected': selectedNodeId === node.id }"
       >
         <rect
           :x="-nodeWidth / 2"
@@ -81,9 +81,9 @@
           :width="nodeWidth"
           :height="nodeHeight"
           rx="8"
-          :fill="isNodeHighlighted(node) || selectedNodeId === node.id ? '#ecf5ff' : '#fff'"
+          :fill="(node.highlighted || selectedNodeId === node.id) ? '#ecf5ff' : '#fff'"
           :stroke="getNodeStroke(node)"
-          :stroke-width="selectedNodeId === node.id ? 2.5 : isNodeHighlighted(node) ? 2 : 1"
+          :stroke-width="(selectedNodeId === node.id) ? 2.5 : (node.highlighted ? 2 : 1)"
         />
         <text
           :x="0"
@@ -118,14 +118,14 @@
       </div>
     </div>
 
-    <div v-if="nodes.length === 0" class="topo-empty">
+    <div v-if="nodeList.length === 0" class="topo-empty">
       暂无依赖关系，无法生成拓扑图
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 
 const props = defineProps({
   dependencies: { type: Array, default: () => [] },
@@ -140,11 +140,16 @@ const svgHeight = ref(500)
 const nodeWidth = 120
 const nodeHeight = 40
 const selectedNodeId = ref(null)
-const highlightedNodes = ref(new Set())
-const highlightedEdges = ref(new Set())
+const highlightedNodeIds = reactive(new Set())
+const highlightedEdgeIds = reactive(new Set())
+
+const nodeMap = reactive(new Map())
+const nodeList = ref([])
+const edgeList = ref([])
 
 const dragging = ref(null)
 const dragOffset = ref({ x: 0, y: 0 })
+const hasDragged = ref(false)
 
 const tooltip = ref({ visible: false, x: 0, y: 0, mappings: [] })
 
@@ -158,7 +163,15 @@ const methodColors = {
   OPTIONS: '#909399'
 }
 
-const storageKey = computed(() => `topo-positions-${props.apis.map(a => a.id).sort().join('-')}`)
+const storageKey = computed(() => {
+  const allIds = new Set()
+  props.apis.forEach(a => allIds.add(a.id))
+  props.dependencies.forEach(d => {
+    allIds.add(d.upstream_api_id)
+    allIds.add(d.downstream_api_id)
+  })
+  return 'topo-positions-' + Array.from(allIds).sort().join('-')
+})
 
 function loadPositions() {
   try {
@@ -170,10 +183,13 @@ function loadPositions() {
 
 function savePositions() {
   const pos = {}
-  nodes.value.forEach(n => { pos[n.id] = { x: n.x, y: n.y } })
+  nodeList.value.forEach(n => { pos[n.id] = { x: n.x, y: n.y } })
   try {
     localStorage.setItem(storageKey.value, JSON.stringify(pos))
-  } catch {}
+    console.log('[Topo] Saved positions to localStorage:', pos)
+  } catch (e) {
+    console.error('[Topo] Failed to save positions:', e)
+  }
 }
 
 const edgeImpactMap = computed(() => {
@@ -198,45 +214,50 @@ function parseAffected(affected) {
   return affected
 }
 
-const nodes = computed(() => {
-  const nodeMap = new Map()
+function rebuildNodeList() {
+  const savedPos = loadPositions()
+  const newNodeMap = new Map()
 
   for (const api of props.apis) {
+    if (newNodeMap.has(api.id)) continue
     const existing = nodeMap.get(api.id)
-    if (existing) continue
-    nodeMap.set(api.id, {
-      id: api.id,
-      method: api.method,
-      path: api.path,
-      x: 0,
-      y: 0
-    })
+    if (existing) {
+      newNodeMap.set(api.id, existing)
+    } else {
+      newNodeMap.set(api.id, {
+        id: api.id,
+        method: api.method,
+        path: api.path,
+        x: 0, y: 0,
+        highlighted: false
+      })
+    }
   }
 
   for (const dep of props.dependencies) {
-    if (!nodeMap.has(dep.upstream_api_id)) {
-      nodeMap.set(dep.upstream_api_id, {
-        id: dep.upstream_api_id,
-        method: dep.upstream_method,
-        path: dep.upstream_path,
-        x: 0,
-        y: 0
-      })
-    }
-    if (!nodeMap.has(dep.downstream_api_id)) {
-      nodeMap.set(dep.downstream_api_id, {
-        id: dep.downstream_api_id,
-        method: dep.downstream_method,
-        path: dep.downstream_path,
-        x: 0,
-        y: 0
-      })
+    for (const [apiId, method, path] of [
+      [dep.upstream_api_id, dep.upstream_method, dep.upstream_path],
+      [dep.downstream_api_id, dep.downstream_method, dep.downstream_path]
+    ]) {
+      if (!newNodeMap.has(apiId)) {
+        const existing = nodeMap.get(apiId)
+        if (existing) {
+          newNodeMap.set(apiId, existing)
+        } else {
+          newNodeMap.set(apiId, {
+            id: apiId,
+            method,
+            path,
+            x: 0, y: 0,
+            highlighted: false
+          })
+        }
+      }
     }
   }
 
-  const allNodes = Array.from(nodeMap.values())
+  const allNodes = Array.from(newNodeMap.values())
 
-  const savedPos = loadPositions()
   if (savedPos) {
     for (const n of allNodes) {
       if (savedPos[n.id]) {
@@ -244,75 +265,79 @@ const nodes = computed(() => {
         n.y = savedPos[n.id].y
       }
     }
-    if (allNodes.every(n => savedPos[n.id])) {
-      return allNodes
+  }
+
+  const hasAnyPosition = allNodes.some(n => n.x !== 0 || n.y !== 0)
+
+  if (!hasAnyPosition) {
+    const upstreamSet = new Set()
+    const downstreamSet = new Set()
+    for (const dep of props.dependencies) {
+      upstreamSet.add(dep.upstream_api_id)
+      downstreamSet.add(dep.downstream_api_id)
     }
-  }
 
-  const upstreamSet = new Set()
-  const downstreamSet = new Set()
-  for (const dep of props.dependencies) {
-    upstreamSet.add(dep.upstream_api_id)
-    downstreamSet.add(dep.downstream_api_id)
-  }
+    const layers = []
+    const assigned = new Set()
+    let currentLayer = allNodes.filter(n => upstreamSet.has(n.id) && !downstreamSet.has(n.id))
+    if (currentLayer.length === 0) {
+      currentLayer = allNodes.filter(n => upstreamSet.has(n.id))
+    }
+    if (currentLayer.length === 0 && allNodes.length > 0) {
+      currentLayer = [allNodes[0]]
+    }
 
-  const layers = []
-  const assigned = new Set()
-  let currentLayer = allNodes.filter(n => upstreamSet.has(n.id) && !downstreamSet.has(n.id))
-  if (currentLayer.length === 0) {
-    currentLayer = allNodes.filter(n => upstreamSet.has(n.id))
-  }
-  if (currentLayer.length === 0 && allNodes.length > 0) {
-    currentLayer = [allNodes[0]]
-  }
-
-  while (assigned.size < allNodes.length && currentLayer.length > 0) {
-    layers.push(currentLayer)
-    currentLayer.forEach(n => assigned.add(n.id))
-    const nextLayer = []
-    for (const node of currentLayer) {
-      for (const dep of props.dependencies) {
-        if (dep.upstream_api_id === node.id && !assigned.has(dep.downstream_api_id)) {
-          const n = allNodes.find(a => a.id === dep.downstream_api_id)
-          if (n && !nextLayer.find(x => x.id === n.id)) {
-            nextLayer.push(n)
+    while (assigned.size < allNodes.length && currentLayer.length > 0) {
+      layers.push([...currentLayer])
+      currentLayer.forEach(n => assigned.add(n.id))
+      const nextLayer = []
+      for (const node of currentLayer) {
+        for (const dep of props.dependencies) {
+          if (dep.upstream_api_id === node.id && !assigned.has(dep.downstream_api_id)) {
+            const n = allNodes.find(a => a.id === dep.downstream_api_id)
+            if (n && !nextLayer.find(x => x.id === n.id)) {
+              nextLayer.push(n)
+            }
           }
         }
       }
+      currentLayer = nextLayer
     }
-    currentLayer = nextLayer
-  }
 
-  const remaining = allNodes.filter(n => !assigned.has(n.id))
-  if (remaining.length > 0) {
-    layers.push(remaining)
-  }
+    const remaining = allNodes.filter(n => !assigned.has(n.id))
+    if (remaining.length > 0) {
+      layers.push(remaining)
+    }
 
-  const layerGap = 200
-  const nodeGap = 80
-  const startX = 100
-  const startY = Math.max(60, (svgHeight.value - (Math.max(...layers.map(l => l.length)) - 1) * nodeGap) / 2)
+    const layerGap = 200
+    const nodeGap = 80
+    const startX = 100
 
-  for (let li = 0; li < layers.length; li++) {
-    const layer = layers[li]
-    const totalH = (layer.length - 1) * nodeGap
-    const offsetY = (svgHeight.value - totalH) / 2
-    for (let ni = 0; ni < layer.length; ni++) {
-      const n = allNodes.find(a => a.id === layer[ni].id)
-      if (n && !savedPos?.[n.id]) {
-        n.x = startX + li * layerGap
-        n.y = offsetY + ni * nodeGap
+    for (let li = 0; li < layers.length; li++) {
+      const layer = layers[li]
+      const totalH = (layer.length - 1) * nodeGap
+      const offsetY = (svgHeight.value - totalH) / 2
+      for (let ni = 0; ni < layer.length; ni++) {
+        const n = allNodes.find(a => a.id === layer[ni].id)
+        if (n && !(savedPos && savedPos[n.id])) {
+          n.x = startX + li * layerGap
+          n.y = Math.max(nodeHeight, offsetY + ni * nodeGap)
+        }
       }
     }
   }
 
-  return allNodes
-})
+  nodeMap.clear()
+  allNodes.forEach(n => nodeMap.set(n.id, n))
+  nodeList.value = allNodes
 
-const edges = computed(() => {
-  return props.dependencies.map(dep => {
-    const src = nodes.value.find(n => n.id === dep.upstream_api_id)
-    const tgt = nodes.value.find(n => n.id === dep.downstream_api_id)
+  rebuildEdgeList()
+}
+
+function rebuildEdgeList() {
+  const edges = props.dependencies.map(dep => {
+    const src = nodeMap.get(dep.upstream_api_id)
+    const tgt = nodeMap.get(dep.downstream_api_id)
     if (!src || !tgt) return null
 
     const dx = tgt.x - src.x
@@ -328,24 +353,27 @@ const edges = computed(() => {
       id: dep.id,
       upstreamId: dep.upstream_api_id,
       downstreamId: dep.downstream_api_id,
-      key: `${dep.upstream_api_id}->${dep.downstream_api_id}`,
+      impactKey: `${dep.upstream_api_id}->${dep.downstream_api_id}`,
       x1, y1, x2, y2,
-      fieldMappings: dep.field_mappings
+      fieldMappings: dep.field_mappings,
+      highlighted: highlightedEdgeIds.has(dep.id)
     }
   }).filter(Boolean)
-})
+
+  edgeList.value = edges
+}
 
 function getEdgeColor(edge) {
-  if (isEdgeHighlighted(edge)) return '#409eff'
-  const level = edgeImpactMap.value.get(edge.key)
+  if (edge.highlighted) return '#409eff'
+  const level = edgeImpactMap.value.get(edge.impactKey)
   if (level === 'Breaking') return '#f56c6c'
   if (level === 'Warning') return '#e6a23c'
   return '#c0c4cc'
 }
 
 function getEdgeMarker(edge) {
-  if (isEdgeHighlighted(edge)) return 'url(#arrow-highlight)'
-  const level = edgeImpactMap.value.get(edge.key)
+  if (edge.highlighted) return 'url(#arrow-highlight)'
+  const level = edgeImpactMap.value.get(edge.impactKey)
   if (level === 'Breaking') return 'url(#arrow-red)'
   if (level === 'Warning') return 'url(#arrow-orange)'
   return 'url(#arrow-gray)'
@@ -353,16 +381,8 @@ function getEdgeMarker(edge) {
 
 function getNodeStroke(node) {
   if (selectedNodeId.value === node.id) return '#409eff'
-  if (highlightedNodes.value.has(node.id)) return '#409eff'
+  if (node.highlighted) return '#409eff'
   return '#dcdfe6'
-}
-
-function isEdgeHighlighted(edge) {
-  return highlightedEdges.value.has(edge.id)
-}
-
-function isNodeHighlighted(node) {
-  return highlightedNodes.value.has(node.id)
 }
 
 function truncatePath(path) {
@@ -373,46 +393,65 @@ function truncatePath(path) {
 
 function onNodeMouseDown(e, node) {
   dragging.value = node
+  hasDragged.value = false
   const svgRect = svgRef.value.getBoundingClientRect()
   dragOffset.value = {
     x: e.clientX - svgRect.left - node.x,
     y: e.clientY - svgRect.top - node.y
   }
+  console.log('[Topo] Drag start:', node.id, node.x, node.y)
 }
 
 function onMouseMove(e) {
   if (!dragging.value) return
   const svgRect = svgRef.value.getBoundingClientRect()
-  dragging.value.x = e.clientX - svgRect.left - dragOffset.value.x
-  dragging.value.y = e.clientY - svgRect.top - dragOffset.value.y
+  const newX = e.clientX - svgRect.left - dragOffset.value.x
+  const newY = e.clientY - svgRect.top - dragOffset.value.y
+  if (Math.abs(newX - dragging.value.x) > 1 || Math.abs(newY - dragging.value.y) > 1) {
+    hasDragged.value = true
+  }
+  dragging.value.x = newX
+  dragging.value.y = newY
+  rebuildEdgeList()
 }
 
 function onMouseUp() {
   if (dragging.value) {
+    console.log('[Topo] Drag end:', dragging.value.id, dragging.value.x, dragging.value.y)
+    const nodeId = dragging.value.id
     dragging.value = null
-    savePositions()
+    if (hasDragged.value) {
+      savePositions()
+    }
+    setTimeout(() => { hasDragged.value = false }, 50)
   }
 }
 
 function onNodeClick(node) {
+  if (hasDragged.value) return
+
+  console.log('[Topo] Node click:', node.id)
+
   if (selectedNodeId.value === node.id) {
     selectedNodeId.value = null
-    highlightedNodes.value = new Set()
-    highlightedEdges.value = new Set()
+    highlightedNodeIds.clear()
+    highlightedEdgeIds.clear()
+    nodeList.value.forEach(n => { n.highlighted = false })
+    edgeList.value.forEach(e => { e.highlighted = false })
     return
   }
 
   selectedNodeId.value = node.id
-  const nodeSet = new Set()
-  const edgeSet = new Set()
+  highlightedNodeIds.clear()
+  highlightedEdgeIds.clear()
 
   const traceUp = (id, visited = new Set()) => {
     if (visited.has(id)) return
     visited.add(id)
     for (const dep of props.dependencies) {
       if (dep.downstream_api_id === id) {
-        nodeSet.add(dep.upstream_api_id)
-        edgeSet.add(dep.id)
+        highlightedNodeIds.add(dep.upstream_api_id)
+        highlightedEdgeIds.add(dep.id)
         traceUp(dep.upstream_api_id, visited)
       }
     }
@@ -423,24 +462,30 @@ function onNodeClick(node) {
     visited.add(id)
     for (const dep of props.dependencies) {
       if (dep.upstream_api_id === id) {
-        nodeSet.add(dep.downstream_api_id)
-        edgeSet.add(dep.id)
+        highlightedNodeIds.add(dep.downstream_api_id)
+        highlightedEdgeIds.add(dep.id)
         traceDown(dep.downstream_api_id, visited)
       }
     }
   }
 
-  nodeSet.add(node.id)
+  highlightedNodeIds.add(node.id)
   traceUp(node.id)
   traceDown(node.id)
 
-  highlightedNodes.value = nodeSet
-  highlightedEdges.value = edgeSet
+  console.log('[Topo] Highlighted nodes:', Array.from(highlightedNodeIds))
+  console.log('[Topo] Highlighted edges:', Array.from(highlightedEdgeIds))
+
+  nodeList.value.forEach(n => {
+    n.highlighted = highlightedNodeIds.has(n.id)
+  })
+  edgeList.value.forEach(e => {
+    e.highlighted = highlightedEdgeIds.has(e.id)
+  })
 }
 
 function showEdgeTooltip(e, edge) {
   const mappings = parseMappings(edge.fieldMappings)
-  const svgRect = svgRef.value.getBoundingClientRect()
   const containerRect = containerRef.value.getBoundingClientRect()
   tooltip.value = {
     visible: true,
@@ -470,21 +515,31 @@ function parseMappings(mappings) {
 function updateSize() {
   if (containerRef.value) {
     svgWidth.value = Math.max(600, containerRef.value.clientWidth - 2)
-    svgHeight.value = Math.max(400, Math.min(600, nodes.value.length * 50 + 100))
+    svgHeight.value = Math.max(400, Math.min(600, nodeList.value.length * 50 + 100))
   }
 }
 
+let rebuildTimer = null
+function scheduleRebuild() {
+  if (rebuildTimer) clearTimeout(rebuildTimer)
+  rebuildTimer = setTimeout(() => {
+    rebuildNodeList()
+    nextTick(updateSize)
+  }, 50)
+}
+
 watch(() => [props.dependencies, props.apis], () => {
-  nextTick(updateSize)
+  scheduleRebuild()
 }, { deep: true })
 
 onMounted(() => {
-  updateSize()
+  scheduleRebuild()
   window.addEventListener('resize', updateSize)
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', updateSize)
+  if (rebuildTimer) clearTimeout(rebuildTimer)
 })
 </script>
 

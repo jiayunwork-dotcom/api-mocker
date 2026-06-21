@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -899,46 +901,76 @@ func (h *Handler) BatchDeleteProbes(c *gin.Context) {
 
 func (h *Handler) ProbeWebSocket(c *gin.Context) {
 	projectID := c.Param("projectId")
+	log.Printf("[WebSocket] Handshake request for project %s, RemoteAddr=%s", projectID, c.Request.RemoteAddr)
 
 	tokenStr := ""
 	authHeader := c.GetHeader("Authorization")
 	if authHeader != "" {
 		tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
+		log.Printf("[WebSocket] Token from Authorization header, length=%d", len(tokenStr))
 	}
 	if tokenStr == "" {
 		tokenStr = c.Query("token")
+		log.Printf("[WebSocket] Token from query string, length=%d", len(tokenStr))
 	}
 
 	if tokenStr == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token required"})
+		log.Printf("[WebSocket] ERROR: No token provided")
+		c.Writer.Header().Set("Content-Type", "text/plain")
+		c.Writer.WriteHeader(http.StatusUnauthorized)
+		c.Writer.Write([]byte("Token required"))
 		return
 	}
 
 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			log.Printf("[WebSocket] ERROR: Wrong signing method: %v", token.Method)
 			return nil, jwt.ErrSignatureInvalid
 		}
 		return []byte(h.cfg.JWTSecret), nil
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		log.Printf("[WebSocket] ERROR: Invalid token, err=%v", err)
+		c.Writer.Header().Set("Content-Type", "text/plain")
+		c.Writer.WriteHeader(http.StatusUnauthorized)
+		c.Writer.Write([]byte("Invalid token"))
 		return
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+		log.Printf("[WebSocket] ERROR: Invalid token claims type")
+		c.Writer.Header().Set("Content-Type", "text/plain")
+		c.Writer.WriteHeader(http.StatusUnauthorized)
+		c.Writer.Write([]byte("Invalid token claims"))
 		return
 	}
 
-	userID, _ := claims["sub"].(string)
+	var userID string
+	switch v := claims["sub"].(type) {
+	case string:
+		userID = v
+	case float64:
+		userID = fmt.Sprintf("%.0f", v)
+	default:
+		log.Printf("[WebSocket] ERROR: Unexpected sub type %T", v)
+		c.Writer.Header().Set("Content-Type", "text/plain")
+		c.Writer.WriteHeader(http.StatusUnauthorized)
+		c.Writer.Write([]byte("Invalid user id in token"))
+		return
+	}
 	c.Set("userID", userID)
+	log.Printf("[WebSocket] Authenticated userID=%s", userID)
 
 	if !h.canAccessProject(c, projectID) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "No access to project"})
+		log.Printf("[WebSocket] ERROR: User %s has no access to project %s", userID, projectID)
+		c.Writer.Header().Set("Content-Type", "text/plain")
+		c.Writer.WriteHeader(http.StatusForbidden)
+		c.Writer.Write([]byte("No access to project"))
 		return
 	}
 
+	log.Printf("[WebSocket] Upgrading to WebSocket...")
 	ws.ServeWS(h.wsHub, projectID, c)
 }

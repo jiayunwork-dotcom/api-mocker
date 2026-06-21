@@ -154,7 +154,7 @@ func (h *Handler) UpdateAPI(c *gin.Context) {
 	}
 
 	var oldAPI models.API
-	err = h.db.Get(&oldAPI, "SELECT * FROM apis WHERE id = $1 AND project_id = $2", apiID, projectID)
+	err = h.db.Get(&oldAPI, `SELECT id, project_id, path, method, description, params, request_body, responses, tags, created_at, updated_at FROM apis WHERE id = $1 AND project_id = $2`, apiID, projectID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "API not found"})
 		return

@@ -3,7 +3,7 @@ package models
 import (
 	"database/sql/driver"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"time"
 
 	"github.com/lib/pq"
@@ -22,14 +22,16 @@ func (j *JSONB) Scan(value interface{}) error {
 	var bytes []byte
 	switch v := value.(type) {
 	case []byte:
-		bytes = v
+		bytes = make([]byte, len(v))
+		copy(bytes, v)
 	case string:
 		bytes = []byte(v)
+	case nil:
+		bytes = []byte("{}")
 	default:
-		return errors.New("failed to unmarshal JSONB value: unsupported type")
+		return fmt.Errorf("failed to unmarshal JSONB value: unsupported type %T", value)
 	}
-	result := JSONB(bytes)
-	*j = result
+	*j = JSONB(bytes)
 	return nil
 }
 

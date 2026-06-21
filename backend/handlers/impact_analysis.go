@@ -41,12 +41,15 @@ func flattenFields(fields []models.BodyField, prefix string) []flatField {
 }
 
 func extractResponseBody(responsesJSON models.JSONB) []models.BodyField {
+	log.Printf("[impact-analysis] extractResponseBody input len=%d, content=%s", len(responsesJSON), string(responsesJSON))
 	var responses map[string]models.ResponseDef
 	if err := json.Unmarshal([]byte(responsesJSON), &responses); err != nil {
+		log.Printf("[impact-analysis] extractResponseBody unmarshal error: %v", err)
 		return nil
 	}
 
-	for _, resp := range responses {
+	for code, resp := range responses {
+		log.Printf("[impact-analysis] response code=%s, body count=%d", code, len(resp.Body))
 		if len(resp.Body) > 0 {
 			return resp.Body
 		}

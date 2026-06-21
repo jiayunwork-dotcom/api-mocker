@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
 
 	"api-mocker/models"
 )
@@ -196,11 +197,13 @@ func (h *Handler) RollbackVersion(c *gin.Context) {
 		}
 	}
 
+	pqTags := pq.StringArray(tags)
+
 	_, err = h.db.Exec(
 		`UPDATE apis SET path = $1, method = $2, description = $3, params = $4,
 		 request_body = $5, responses = $6, tags = $7, updated_at = NOW() WHERE id = $8`,
 		snap["path"], snap["method"], snap["description"],
-		models.JSONB(paramsJSON), models.JSONB(bodyJSON), models.JSONB(responsesJSON), models.StringArray(tags), apiID,
+		paramsJSON, bodyJSON, responsesJSON, pqTags, apiID,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to rollback"})

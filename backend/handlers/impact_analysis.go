@@ -284,8 +284,8 @@ func (h *Handler) analyzeImpact(apiID, projectID, userID string, oldAPI, newAPI 
 			change_type, changed_fields, affected_downstream, has_breaking_change, created_by
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`, report.ID, report.ProjectID, report.ChangedAPIID, report.ChangedAPIPath,
-		report.ChangedAPIMethod, report.ChangeType, report.ChangedFields,
-		report.AffectedDownstream, report.HasBreakingChange, report.CreatedBy)
+		report.ChangedAPIMethod, report.ChangeType, []byte(report.ChangedFields),
+		[]byte(report.AffectedDownstream), report.HasBreakingChange, report.CreatedBy)
 	if err != nil {
 		return nil, err
 	}

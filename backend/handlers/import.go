@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 
 	"api-mocker/models"
 )
@@ -234,11 +235,13 @@ func (h *Handler) importAPIs(projectID, userID string, openapi map[string]interf
 				continue
 			}
 
+			pqTags := pq.StringArray(api.Tags)
+
 			_, err = tx.Exec(
 				`INSERT INTO apis (id, project_id, path, method, description, params, request_body, responses, tags)
 				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 				api.ID, api.ProjectID, api.Path, api.Method, api.Description,
-				api.Params, api.RequestBody, api.Responses, api.Tags,
+				[]byte(api.Params), []byte(api.RequestBody), []byte(api.Responses), pqTags,
 			)
 			if err != nil {
 				tx.Rollback()

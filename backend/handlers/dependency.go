@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -70,7 +71,8 @@ func (h *Handler) CreateDependency(c *gin.Context) {
 		WHERE upstream_api_id = $1 AND downstream_api_id = $2
 	`, req.UpstreamAPIID, req.DownstreamAPIID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check existing dependency"})
+		log.Printf("[CreateDependency] Failed to check existing dependency: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check existing dependency: " + err.Error()})
 		return
 	}
 	if existing > 0 {
@@ -88,12 +90,16 @@ func (h *Handler) CreateDependency(c *gin.Context) {
 		FieldMappings:   models.JSONB(mappingsJSON),
 	}
 
+	log.Printf("[CreateDependency] Inserting dep: id=%s, project=%s, upstream=%s, downstream=%s, mappings=%s",
+		dep.ID, dep.ProjectID, dep.UpstreamAPIID, dep.DownstreamAPIID, string(dep.FieldMappings))
+
 	_, err = h.db.Exec(`
 		INSERT INTO api_dependencies (id, project_id, upstream_api_id, downstream_api_id, field_mappings)
 		VALUES ($1, $2, $3, $4, $5)
-	`, dep.ID, dep.ProjectID, dep.UpstreamAPIID, dep.DownstreamAPIID, dep.FieldMappings)
+	`, dep.ID, dep.ProjectID, dep.UpstreamAPIID, dep.DownstreamAPIID, []byte(dep.FieldMappings))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create dependency"})
+		log.Printf("[CreateDependency] Failed to insert dependency: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create dependency: " + err.Error()})
 		return
 	}
 
@@ -131,7 +137,7 @@ func (h *Handler) UpdateDependency(c *gin.Context) {
 
 	_, err = h.db.Exec(`
 		UPDATE api_dependencies SET field_mappings = $1, updated_at = NOW() WHERE id = $2
-	`, models.JSONB(mappingsJSON), depID)
+	`, []byte(mappingsJSON), depID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update dependency"})
 		return

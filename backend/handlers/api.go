@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 
 	"api-mocker/models"
 )
@@ -93,6 +94,7 @@ func (h *Handler) CreateAPI(c *gin.Context) {
 	if tags == nil {
 		tags = models.StringArray{}
 	}
+	pqTags := pq.StringArray(tags)
 
 	api := models.API{
 		ID:          uuid.New().String(),
@@ -110,7 +112,7 @@ func (h *Handler) CreateAPI(c *gin.Context) {
 		`INSERT INTO apis (id, project_id, path, method, description, params, request_body, responses, tags)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		api.ID, api.ProjectID, api.Path, api.Method, api.Description,
-		api.Params, api.RequestBody, api.Responses, api.Tags,
+		[]byte(api.Params), []byte(api.RequestBody), []byte(api.Responses), pqTags,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create API"})
@@ -212,6 +214,8 @@ func (h *Handler) UpdateAPI(c *gin.Context) {
 		tags = oldAPI.Tags
 	}
 
+	pqTags := pq.StringArray(tags)
+
 	newAPI := models.API{
 		ID:          apiID,
 		ProjectID:   projectID,
@@ -231,10 +235,14 @@ func (h *Handler) UpdateAPI(c *gin.Context) {
 		`UPDATE apis SET path = $1, method = $2, description = $3, params = $4,
 		 request_body = $5, responses = $6, tags = $7, updated_at = NOW() WHERE id = $8`,
 		newAPI.Path, newAPI.Method, newAPI.Description,
-		newAPI.Params, newAPI.RequestBody, newAPI.Responses, newAPI.Tags, apiID,
+		[]byte(newAPI.Params), []byte(newAPI.RequestBody), []byte(newAPI.Responses), pqTags, apiID,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update API"})
+		log.Printf("[UpdateAPI] Failed to update API %s: %v", apiID, err)
+		log.Printf("[UpdateAPI] Tags value: %v (len=%d, type=%T)", newAPI.Tags, len(newAPI.Tags), newAPI.Tags)
+		log.Printf("[UpdateAPI] Params len: %d, RequestBody len: %d, Responses len: %d",
+			len(newAPI.Params), len(newAPI.RequestBody), len(newAPI.Responses))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update API: " + err.Error()})
 		return
 	}
 

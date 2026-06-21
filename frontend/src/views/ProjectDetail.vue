@@ -87,8 +87,11 @@
           <div class="dependency-section">
             <div class="section-header">
               <div class="section-title" style="margin:0">依赖关系管理</div>
-              <div class="dep-actions">
-                <el-button @click="showBatchDepDialog = true">批量导入</el-button>
+              <div style="display:flex;gap:8px">
+                <el-button @click="showBatchDepDialog = true">
+                  <el-icon style="margin-right:4px"><UploadFilled /></el-icon>
+                  批量导入
+                </el-button>
                 <el-button type="primary" @click="openDepDialog()">新建依赖</el-button>
               </div>
             </div>
@@ -96,6 +99,7 @@
             <el-table
               :data="dependencies"
               style="width: 100%"
+              row-key="id"
               :expand-row-keys="expandedDepRows"
               @expand-change="onDepExpandChange"
             >
@@ -158,7 +162,7 @@
               <div class="section-title" style="margin:0">变更影响记录</div>
             </div>
 
-            <el-table :data="impactReports" style="width: 100%">
+            <el-table :data="impactReports" style="width: 100%" row-key="id">
               <el-table-column label="变更接口" min-width="200">
                 <template #default="{ row }">
                   <span :class="['method-badge', `method-${row.changed_api_method.toLowerCase()}`]">

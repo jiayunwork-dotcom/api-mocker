@@ -65,6 +65,8 @@ func main() {
 
 	api := r.Group("/api")
 	{
+		api.GET("/projects/:projectId/probes/ws", h.ProbeWebSocket)
+
 		auth := api.Group("")
 		auth.Use(authMiddleware)
 		{
@@ -148,8 +150,6 @@ func main() {
 				probes.PUT("/:probeId", h.UpdateProbe)
 				probes.DELETE("/:probeId", h.DeleteProbe)
 			}
-
-			api.GET("/projects/:projectId/probes/ws", h.ProbeWebSocket)
 
 			apis.GET("/:id/probe", h.GetAPIProbe)
 			apis.POST("/:id/probe", h.CreateProbeForAPI)
